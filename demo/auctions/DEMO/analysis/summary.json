@@ -1,0 +1,38 @@
+{
+  "auction": "DEMO",
+  "snapshot": "2026-11-06.csv",
+  "assumptions": {
+    "bid_multiple": 1.0,
+    "closing_cost_pct": 0.03,
+    "vacancy_rate": 0.06,
+    "opex_pct": 0.25,
+    "property_tax_rate": 0.0125,
+    "target_cap_rate": 0.08,
+    "rent_factor": 1.0,
+    "rehab_min": 10000.0,
+    "rehab_per_sqft_new": 15.0,
+    "rehab_per_sqft_mid": 30.0,
+    "rehab_per_sqft_old": 45.0,
+    "recent_transfer_years": 3.0,
+    "equity_ratio_flag": 10.0
+  },
+  "items": 360,
+  "by_segment": {
+    "land": 229,
+    "rental": 130,
+    "review": 1
+  },
+  "excluded": {
+    "tax_current": 25,
+    "multi_unit_5plus": 4,
+    "no_residential_units": 4,
+    "no_bedroom_data": 3,
+    "enrichment_failed": 1,
+    "improved_flag_without_address": 1
+  },
+  "ranked": 107,
+  "median_cap_rate": 0.2147444217788319,
+  "above_target": 96,
+  "synthetic": true,
+  "label": "Synthetic demo data: not real parcels, addresses or prices"
+}

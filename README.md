@@ -66,7 +66,25 @@ Writes `data/auctions/<id>/analysis/scored.csv` and `summary.json`.
 - All rates/costs are assumptions in `config/assumptions.toml`. The minimum bid is only a floor, so try
   `bid_multiple` of 1.5-3 to see how fast yield falls.
 
+## Phase 4: static dashboard (done, shown with synthetic data)
+
+```bash
+lacounty-tax make-demo                                   # fake auction -> demo/auctions/DEMO (for trying the UI)
+lacounty-tax build-site --data-dir demo/auctions --out docs
+lacounty-tax build-site                                  # real data: data/auctions/*/analysis -> docs/index.html
+```
+
+`docs/index.html` is one self-contained file (data, CSS and JS inlined; no CDN), ready for GitHub Pages
+(Settings -> Pages -> deploy from `docs/`). Open it straight from disk to preview.
+
+- Tabs for **Rentals** (ranked), **Land**, and **Excluded** (with the reason breakdown); search, jurisdiction,
+  type, max-bid and min-cap filters; sortable table; click a row (or a chart point) for the full return model.
+- **Bid slider:** the minimum bid is only a floor, so cap rates, ranks, max bid and the "at or above target"
+  count are recomputed in the browser for any expected winning bid (1x-6x the minimum), and the target
+  cap rate is editable. The formula is the same as `analyze.py` (a test runs the JS under Node and compares).
+- Several auctions in `data/auctions/` show up in an auction picker; synthetic ones are labelled and sorted last.
+- The demo uses invented addresses/AINs and a banner; it is not real data and should not be relied on.
+
 ## Roadmap
 
-4. Static dashboard (GitHub Pages)
-5. Scheduled GitHub Actions workflow
+5. Scheduled GitHub Actions workflow (and a Pages deploy)

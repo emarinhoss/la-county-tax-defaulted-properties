@@ -239,7 +239,8 @@ def latest_snapshot(auction_dir: Path) -> Path:
 
 
 def run_analysis(auction_dir: Path, fmr: pd.DataFrame, a: Assumptions,
-                 snapshot_path: Path | None = None) -> tuple[Path, pd.DataFrame]:
+                 snapshot_path: Path | None = None,
+                 extra_summary: dict | None = None) -> tuple[Path, pd.DataFrame]:
     snapshot_path = snapshot_path or latest_snapshot(auction_dir)
     items = pd.read_csv(auction_dir / "items.csv", dtype={"ain": str, "zip": str, "zip4": str})
     snap = pd.read_csv(snapshot_path, dtype={"ain": str})
@@ -261,5 +262,6 @@ def run_analysis(auction_dir: Path, fmr: pd.DataFrame, a: Assumptions,
         "median_cap_rate": None if ranked.empty else float(ranked["cap_rate"].median()),
         "above_target": int((ranked["cap_rate"] >= a.target_cap_rate).sum()),
     }
+    summary.update(extra_summary or {})
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     return out_dir / "scored.csv", res

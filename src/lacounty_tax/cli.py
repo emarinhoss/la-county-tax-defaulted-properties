@@ -10,6 +10,8 @@ from .analyze import Assumptions, run_analysis
 from .enrich import run_enrichment
 from .fetch import FetchError, download_pdf
 from .parse import parse_pdf
+from .site import build_site
+from .synthetic import make_demo
 from .reference import load_safmr_xlsx, parse_safmr_text, read_fmr_csv
 
 
@@ -98,6 +100,25 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_make_demo(args: argparse.Namespace) -> int:
+    fmr = read_fmr_csv(args.fmr)
+    if "metro_default" not in fmr:
+        fmr["metro_default"] = False
+    path = make_demo(Path(args.out), fmr)
+    print(f"synthetic demo auction -> {path}")
+    return 0
+
+
+def _cmd_build_site(args: argparse.Namespace) -> int:
+    try:
+        out = build_site([Path(d) for d in (args.data_dir or ["data/auctions"])], Path(args.out))
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(f"dashboard -> {out}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="lacounty-tax")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -138,6 +159,16 @@ def main(argv: list[str] | None = None) -> int:
     z.add_argument("--snapshot", help="enrichment snapshot CSV (default: the latest)")
     z.add_argument("--top", type=int, default=15, help="rows to print (default 15)")
     z.set_defaults(func=_cmd_analyze)
+
+    d = sub.add_parser("make-demo", help="write a clearly fake demo auction for trying the dashboard")
+    d.add_argument("--out", default="demo/auctions")
+    d.add_argument("--fmr", default="data/reference/hud_safmr.csv")
+    d.set_defaults(func=_cmd_make_demo)
+
+    w = sub.add_parser("build-site", help="build the static dashboard (docs/index.html)")
+    w.add_argument("--data-dir", action="append", help="folder of auctions; repeatable (default data/auctions)")
+    w.add_argument("--out", default="docs")
+    w.set_defaults(func=_cmd_build_site)
 
     args = ap.parse_args(argv)
     return args.func(args)
