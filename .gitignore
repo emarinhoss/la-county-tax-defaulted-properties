@@ -1,0 +1,7 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+# Raw county PDFs are not stored (processed tables only); drop them in data/inbox/ locally.
+data/inbox/*
+!data/inbox/.gitkeep
