@@ -85,6 +85,46 @@ lacounty-tax build-site                                  # real data: data/aucti
 - Several auctions in `data/auctions/` show up in an auction picker; synthetic ones are labelled and sorted last.
 - The demo uses invented addresses/AINs and a banner; it is not real data and should not be relied on.
 
+## Phase 5: automation (done; workflows have not run on GitHub yet)
+
+Two workflows in `.github/workflows/`:
+
+- **CI** (`ci.yml`): tests on Python 3.11 and 3.12 and a dashboard build from synthetic data, on every push.
+- **Refresh and publish** (`refresh.yml`): Mondays 14:17 UTC, or run it by hand. It re-pulls Assessor data for auctions that
+  are still before their sale date, re-scores them, commits `data/`, rebuilds the dashboard and deploys it to GitHub Pages.
+  All logic lives in `lacounty-tax refresh` (tested); the YAML only wires it up.
+
+### One-time setup
+
+1. Merge this work into the default branch (scheduled workflows only run from there).
+2. Settings -> Pages -> Source: **GitHub Actions**.
+3. Settings -> Actions -> General -> Workflow permissions: **Read and write**.
+4. Actions -> "Refresh and publish" -> Run workflow, to check that it works.
+
+Until an auction has been scored, the published page is the synthetic demo (with its banner).
+
+### Using it
+
+- **New auction book:** parse it where you can download the PDF, then commit the result:
+  `lacounty-tax parse book.pdf --sale-date 2026-12-05` writes `items.csv` and `meta.json`. Or run the workflow manually with
+  `book_url` and `sale_date` to do the same on the runner (the county site may refuse it; see below).
+  After `sale_date` the auction is frozen: scheduled runs stop re-pulling it, and its last snapshot stays.
+- **HUD rents:** once a year, `lacounty-tax load-fmr` with the new table and commit `data/reference/hud_safmr.csv`.
+- **Assumptions:** edit `config/assumptions.toml`; the next run re-scores with it.
+- **Preview the site:** `lacounty-tax build-site --out _site` (real data) and open `_site/index.html`.
+
+### If the county sites block GitHub's runners
+
+Both county hosts sit behind bot protection that refused the cloud sandbox this was built in, and may refuse Actions runners too.
+The refresh step then does **not** fail: it adds a warning annotation and a table in the run summary, commits nothing, and still
+republishes the dashboard from the data already in the repo. In that case run it from your own machine and push:
+
+```bash
+lacounty-tax refresh          # same command CI runs
+git add data && git commit -m "Refresh data" && git push
+```
+
 ## Roadmap
 
-5. Scheduled GitHub Actions workflow (and a Pages deploy)
+All five phases are in place. Ideas not built: automatic discovery of new auction books, a map, winning-bid history,
+alerts, Census rent cross-checks.
