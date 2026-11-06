@@ -5,3 +5,4 @@ __pycache__/
 # Raw county PDFs are not stored (processed tables only); drop them in data/inbox/ locally.
 data/inbox/*
 !data/inbox/.gitkeep
+.cache/
