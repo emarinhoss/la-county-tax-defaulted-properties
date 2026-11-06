@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "lacounty-tax"
 version = "0.1.0"
 description = "Collect, enrich and analyze LA County tax-defaulted property auctions."
-requires-python = ">=3.10"
-dependencies = ["pdfplumber>=0.11", "pandas>=2.0", "requests>=2.31"]
+requires-python = ">=3.11"
+dependencies = ["pdfplumber>=0.11", "pandas>=2.0", "requests>=2.31", "openpyxl>=3.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

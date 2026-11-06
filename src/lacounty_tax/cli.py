@@ -6,9 +6,11 @@ import sys
 from pathlib import Path
 
 from .assessor import AssessorClient, BlockedError
+from .analyze import Assumptions, run_analysis
 from .enrich import run_enrichment
 from .fetch import FetchError, download_pdf
 from .parse import parse_pdf
+from .reference import load_safmr_xlsx, read_fmr_csv
 
 
 def _cmd_parse(args: argparse.Namespace) -> int:
@@ -61,6 +63,38 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _cmd_load_fmr(args: argparse.Namespace) -> int:
+    try:
+        table = load_safmr_xlsx(args.xlsx, args.year)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out, index=False)
+    print(f"{len(table)} ZIP codes -> {out}")
+    return 0
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    auction_dir = Path(args.data_dir) / args.auction
+    try:
+        fmr = read_fmr_csv(args.fmr)
+        assumptions = Assumptions.from_toml(args.config) if args.config else Assumptions()
+        out, res = run_analysis(auction_dir, fmr, assumptions,
+                                Path(args.snapshot) if args.snapshot else None)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    ranked = res[res["rank"].notna()]
+    print(f"{args.auction}: {len(res)} items scored, {len(ranked)} ranked -> {out}")
+    cols = ["rank", "item", "property_address", "min_bid", "est_monthly_rent", "cap_rate",
+            "max_bid_for_target", "rehab_risk", "redemption_risk"]
+    if len(ranked):
+        print(ranked.sort_values("rank").head(args.top)[cols].to_string(index=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="lacounty-tax")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -86,6 +120,21 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--delay", type=float, default=0.5, help="seconds between requests (default 0.5)")
     e.add_argument("--limit", type=int, help="only the first N parcels (for trying it out)")
     e.set_defaults(func=_cmd_enrich)
+
+    m = sub.add_parser("load-fmr", help="convert a downloaded HUD SAFMR .xlsx into data/reference/hud_safmr.csv")
+    m.add_argument("xlsx")
+    m.add_argument("--year", type=int, help="HUD fiscal year, recorded in the output")
+    m.add_argument("--out", default="data/reference/hud_safmr.csv")
+    m.set_defaults(func=_cmd_load_fmr)
+
+    z = sub.add_parser("analyze", help="score an auction's parcels as rent-and-hold candidates")
+    z.add_argument("auction")
+    z.add_argument("--data-dir", default="data/auctions")
+    z.add_argument("--fmr", default="data/reference/hud_safmr.csv")
+    z.add_argument("--config", help="TOML file overriding the default assumptions")
+    z.add_argument("--snapshot", help="enrichment snapshot CSV (default: the latest)")
+    z.add_argument("--top", type=int, default=15, help="rows to print (default 15)")
+    z.set_defaults(func=_cmd_analyze)
 
     args = ap.parse_args(argv)
     return args.func(args)

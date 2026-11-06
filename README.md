@@ -40,8 +40,29 @@ lacounty-tax enrich 2026B --limit 20 # try a few parcels first
   is written; progress stays cached. The cloud sandbox this was built in is blocked, so run it from
   your own machine or check whether GitHub Actions is accepted.
 
+## Phase 3: analysis (done; needs the HUD file and a live enrichment to produce real output)
+
+```bash
+# one-time per fiscal year: download "SAFMR" xlsx from https://www.huduser.gov/portal/datasets/fmr.html
+lacounty-tax load-fmr fy2026_safmrs.xlsx --year 2026   # -> data/reference/hud_safmr.csv
+lacounty-tax analyze 2026B --config config/assumptions.toml
+```
+
+Writes `data/auctions/<id>/analysis/scored.csv` and `summary.json`.
+
+- **Segments:** `rental` (improved, has an address) is ranked; `land` (unimproved/vacant) gets bid per lot
+  sqft and bid-to-assessed ratio; `review` is the few parcels flagged improved but with a `VACANT LOT` address.
+- **Excluded (kept in the table with a reason):** tax status `CURRENT`, enrichment missing/failed, no
+  residential units, more than 4 units, no HUD rent for the ZIP, no bedroom count.
+- **Rent:** HUD SAFMR by ZIP and bedrooms (multi-unit splits bedrooms evenly across units).
+- **Return:** `cap_rate` at `min_bid * bid_multiple`, `max_bid_for_target` (the highest bid that still
+  meets `target_cap_rate`) and `bid_headroom` (that, divided by the minimum bid). Rank = cap rate.
+- **Risk columns:** `rehab_risk` (age and structure-to-land assessed value), `redemption_risk` (recent
+  transfer, large owner equity, status changes) and a `checklist` reminding you about liens and unknown occupancy.
+- All rates/costs are assumptions in `config/assumptions.toml`. The minimum bid is only a floor, so try
+  `bid_multiple` of 1.5-3 to see how fast yield falls.
+
 ## Roadmap
 
-3. Analysis: rent estimates from free HUD/Census data, yield and risk flags
 4. Static dashboard (GitHub Pages)
 5. Scheduled GitHub Actions workflow
