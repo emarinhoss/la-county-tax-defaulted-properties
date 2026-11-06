@@ -18,7 +18,20 @@ import pandas as pd
 
 BEDROOMS = range(5)
 FMR_COLUMNS = [f"fmr_{b}br" for b in BEDROOMS]
-OUT_COLUMNS = ["zip", "area_name", *FMR_COLUMNS, "fiscal_year"]
+OUT_COLUMNS = ["zip", "area_name", *FMR_COLUMNS, "fiscal_year", "metro_default"]
+
+
+def _flag_metro_default(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark ZIPs carrying the single most common rent row.
+
+    HUD fills ZIPs it lacks data for with the metro-wide figure, so a large block of
+    identical rows is not ZIP-specific. We flag them instead of trusting them.
+    """
+    df = df.copy()
+    rents = df[FMR_COLUMNS].apply(tuple, axis=1)
+    top = rents.value_counts()
+    df["metro_default"] = (rents == top.index[0]) & (top.iloc[0] >= 10) if len(df) else False
+    return df
 
 
 def _norm(header: object) -> str:
@@ -52,7 +65,34 @@ def normalize_safmr(raw: pd.DataFrame, fiscal_year: int | None = None,
     out["fiscal_year"] = fiscal_year
     lo, hi = zip_range
     out = out[(out["zip"] >= lo) & (out["zip"] <= hi)].dropna(subset=FMR_COLUMNS)
-    return out.drop_duplicates("zip").sort_values("zip").reset_index(drop=True)[OUT_COLUMNS]
+    out = out.drop_duplicates("zip").sort_values("zip").reset_index(drop=True)
+    return _flag_metro_default(out)[OUT_COLUMNS]
+
+
+_ROW = re.compile(r"^\s*(\d{5})" + r"\s+\$?([\d,]+)" * 5 + r"\s*$")
+
+
+def parse_safmr_text(text: str, fiscal_year: int | None = None,
+                     zip_range: tuple[str, str] = ("90001", "93599")) -> pd.DataFrame:
+    """Parse the table copied from the HUD "Small Area FMRs" web page.
+
+    Each data line is a ZIP followed by the efficiency..four-bedroom rents, with or
+    without ``$`` and thousands separators. Header and prose lines are ignored.
+    """
+    rows = []
+    for line in text.splitlines():
+        m = _ROW.match(line)
+        if m:
+            rows.append({"zip": m.group(1), "area_name": None,
+                         **{f"fmr_{b}br": float(m.group(2 + b).replace(",", "")) for b in BEDROOMS},
+                         "fiscal_year": fiscal_year})
+    if not rows:
+        raise ValueError("no 'ZIP $rent x5' rows found in the text")
+    out = pd.DataFrame(rows, columns=OUT_COLUMNS[:-1])
+    lo, hi = zip_range
+    out = out[(out["zip"] >= lo) & (out["zip"] <= hi)]
+    out = out.drop_duplicates("zip").sort_values("zip").reset_index(drop=True)
+    return _flag_metro_default(out)[OUT_COLUMNS]
 
 
 def load_safmr_xlsx(path: str | Path, fiscal_year: int | None = None) -> pd.DataFrame:

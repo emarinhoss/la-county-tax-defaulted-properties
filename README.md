@@ -43,8 +43,10 @@ lacounty-tax enrich 2026B --limit 20 # try a few parcels first
 ## Phase 3: analysis (done; needs the HUD file and a live enrichment to produce real output)
 
 ```bash
-# one-time per fiscal year: download "SAFMR" xlsx from https://www.huduser.gov/portal/datasets/fmr.html
-lacounty-tax load-fmr fy2026_safmrs.xlsx --year 2026   # -> data/reference/hud_safmr.csv
+# once per HUD fiscal year (HUD blocks scripts): either save the "Small Area FMRs by Unit Bedrooms" table
+# from the LA County page on https://www.huduser.gov/portal/datasets/fmr.html as a text file, or download the
+# nationwide SAFMR .xlsx, then:
+lacounty-tax load-fmr safmr_la.txt --year 2027         # -> data/reference/hud_safmr.csv (FY2027 is committed)
 lacounty-tax analyze 2026B --config config/assumptions.toml
 ```
 
@@ -54,7 +56,9 @@ Writes `data/auctions/<id>/analysis/scored.csv` and `summary.json`.
   sqft and bid-to-assessed ratio; `review` is the few parcels flagged improved but with a `VACANT LOT` address.
 - **Excluded (kept in the table with a reason):** tax status `CURRENT`, enrichment missing/failed, no
   residential units, more than 4 units, no HUD rent for the ZIP, no bedroom count.
-- **Rent:** HUD SAFMR by ZIP and bedrooms (multi-unit splits bedrooms evenly across units).
+- **Rent:** HUD SAFMR by ZIP and bedrooms. About 37% of LA ZIPs carry HUD's identical metro-wide fallback row;
+  those are flagged `fmr_metro_default` and are not ZIP-specific.
+  Multi-unit splits bedrooms evenly across units).
 - **Return:** `cap_rate` at `min_bid * bid_multiple`, `max_bid_for_target` (the highest bid that still
   meets `target_cap_rate`) and `bid_headroom` (that, divided by the minimum bid). Rank = cap rate.
 - **Risk columns:** `rehab_risk` (age and structure-to-land assessed value), `redemption_risk` (recent

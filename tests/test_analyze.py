@@ -180,3 +180,29 @@ def test_run_analysis_and_cli(tmp_path, capsys):
     scored = pd.read_csv(d / "analysis" / "scored.csv", dtype={"ain": str})
     assert len(scored) == 7 and (d / "analysis" / "summary.json").exists()
     assert main(["analyze", "T", "--data-dir", str(tmp_path / "nope"), "--fmr", str(tmp_path / "fmr.csv")]) == 2
+
+
+TEXT = """Los Angeles-Long Beach-Glendale, CA HUD Metro FMR Area Small Area FMRs By Unit Bedrooms
+ZIP Code	Efficiency	One-Bedroom	Two-Bedroom	Three-Bedroom	Four-Bedroom
+90001	$1,690	$1,890	$2,330	$2,960	$3,310
+90004	$2,320	$2,590	$3,190	$4,050	$4,530
+""" + "".join(f"9{i:04d}\t$2,150\t$2,400\t$2,960\t$3,760\t$4,200\n" for i in range(1100, 1112)) + "10001\t$1\t$2\t$3\t$4\t$5\n"
+
+
+def test_parse_safmr_text_and_metro_default_flag():
+    from lacounty_tax.reference import parse_safmr_text
+    t = parse_safmr_text(TEXT, 2027)
+    assert len(t) == 14                                    # 10001 is outside the LA ZIP range
+    r = t.set_index("zip")
+    assert r.loc["90001", "fmr_2br"] == 2330 and r.loc["90001", "fiscal_year"] == 2027
+    assert not r.loc["90001", "metro_default"] and r.loc["91100", "metro_default"]
+    with pytest.raises(ValueError, match="no 'ZIP"):
+        parse_safmr_text("nothing here")
+
+
+def test_cli_load_fmr_text(tmp_path):
+    src = tmp_path / "safmr.txt"
+    src.write_text(TEXT)
+    out = tmp_path / "ref" / "fmr.csv"
+    assert main(["load-fmr", str(src), "--year", "2027", "--out", str(out)]) == 0
+    assert pd.read_csv(out, dtype={"zip": str}).shape[0] == 14

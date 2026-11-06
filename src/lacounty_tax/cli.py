@@ -10,7 +10,7 @@ from .analyze import Assumptions, run_analysis
 from .enrich import run_enrichment
 from .fetch import FetchError, download_pdf
 from .parse import parse_pdf
-from .reference import load_safmr_xlsx, read_fmr_csv
+from .reference import load_safmr_xlsx, parse_safmr_text, read_fmr_csv
 
 
 def _cmd_parse(args: argparse.Namespace) -> int:
@@ -65,7 +65,10 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
 
 def _cmd_load_fmr(args: argparse.Namespace) -> int:
     try:
-        table = load_safmr_xlsx(args.xlsx, args.year)
+        if Path(args.xlsx).suffix.lower() in (".xlsx", ".xls"):
+            table = load_safmr_xlsx(args.xlsx, args.year)
+        else:  # text copied from the HUD web page
+            table = parse_safmr_text(Path(args.xlsx).read_text(), args.year)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -121,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--limit", type=int, help="only the first N parcels (for trying it out)")
     e.set_defaults(func=_cmd_enrich)
 
-    m = sub.add_parser("load-fmr", help="convert a downloaded HUD SAFMR .xlsx into data/reference/hud_safmr.csv")
+    m = sub.add_parser("load-fmr", help="convert a HUD SAFMR .xlsx, or the table copied from HUD's web page as text, into data/reference/hud_safmr.csv")
     m.add_argument("xlsx")
     m.add_argument("--year", type=int, help="HUD fiscal year, recorded in the output")
     m.add_argument("--out", default="data/reference/hud_safmr.csv")

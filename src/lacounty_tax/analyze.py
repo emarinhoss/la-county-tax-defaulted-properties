@@ -208,6 +208,7 @@ def score(items: pd.DataFrame, snapshot: pd.DataFrame, fmr: pd.DataFrame, a: Ass
                     rent = estimate_monthly_rent(units, beds, fmr_row, a.rent_factor)
                     if rent is None:
                         row["excluded"] = "no_bedroom_data"
+            row["fmr_metro_default"] = bool(fmr_row.get("metro_default", False)) if fmr_row else None
             rehab = rehab_estimate(a, sqft, year)
             row["rehab_estimate"] = rehab
             row["rehab_risk"] = rehab_risk(year, land, imp)
