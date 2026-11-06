@@ -102,3 +102,4 @@ tbody tr:hover, tbody tr.sel { background: var(--grid); }
 #tip[hidden] { display: none; }
 footer { color: var(--ink-3); font-size: .8rem; padding: 18px 0 40px; display: grid; gap: 6px; }
 a { color: var(--series); }
+.flag { font-weight: 650; }

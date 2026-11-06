@@ -56,7 +56,7 @@ if (typeof document !== "undefined") (function () {
 
   const state = {
     ai: 0, seg: "rental", m: 1, target: 0.08,
-    f: { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false },
+    f: { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false },
     sort: { rental: ["cap", -1], land: ["bidPerSqft", 1], excluded: ["min_bid", 1] },
     shown: 40, selected: null,
   };
@@ -97,6 +97,7 @@ if (typeof document !== "undefined") (function () {
       if (!hay.includes(q)) return false;
     }
     if (f.maxBid !== "" && r.min_bid > +f.maxBid) return false;
+    if (f.onlyDefaulted && r.tax_status !== "DEFAULTED") return false;
     if (state.seg === "rental") {
       if (f.minCap !== "" && (r.cap == null || r.cap < +f.minCap / 100)) return false;
       if (f.noHighRehab && r.rehab_risk === "high") return false;
@@ -268,6 +269,11 @@ if (typeof document !== "undefined") (function () {
 
   /* ---------- table ---------- */
   const risk = (v) => (v ? h("span", { class: "risk risk-" + v }, RISK_GLYPH[v]) : "n/a");
+  const STATUS_NOTE = "Status is not DEFAULTED. Confirm with the Tax Collector why this parcel is on the sale list and that it is still being sold.";
+  const statusCell = (r) =>
+    r.tax_status && r.tax_status !== "DEFAULTED"
+      ? h("span", { class: "flag", title: STATUS_NOTE }, "⚑ " + r.tax_status)
+      : r.tax_status ?? "n/a";
   const addr = (r) =>
     r.property_address && r.property_address !== "VACANT LOT"
       ? r.property_address.replace(/(\d{5}) \d{4}$/, "$1")   // drop the ZIP+4 suffix
@@ -286,6 +292,7 @@ if (typeof document !== "undefined") (function () {
       ["headroom", "Headroom", (r) => fmtX(r.headroom), "num"],
       ["rehab_risk", "Rehab", (r) => risk(r.rehab_risk), "txt"],
       ["redemption_risk", "Redemption", (r) => risk(r.redemption_risk), "txt"],
+      ["tax_status", "Tax status", statusCell, "txt"],
     ],
     land: [
       ["item", "Item", (r) => r.item, "num"],
@@ -296,6 +303,7 @@ if (typeof document !== "undefined") (function () {
       ["bidPerSqft", "$/lot sqft", (r) => (r.bidPerSqft == null ? "n/a" : "$" + r.bidPerSqft.toFixed(2)), "num strong"],
       ["assessed_value", "Assessed", (r) => fmtUsd(r.assessed_value), "num"],
       ["bid_to_assessed", "Bid ÷ assessed", (r) => fmtPct(r.bid_to_assessed, 0), "num"],
+      ["tax_status", "Tax status", statusCell, "txt"],
     ],
     excluded: [
       ["item", "Item", (r) => r.item, "num"],
@@ -303,7 +311,7 @@ if (typeof document !== "undefined") (function () {
       ["segment", "Segment", (r) => r.segment, "txt"],
       ["excluded", "Reason", (r) => REASONS[r.excluded] || r.excluded, "txt"],
       ["min_bid", "Min bid", (r) => fmtUsd(r.min_bid), "num"],
-      ["tax_status", "Tax status", (r) => r.tax_status ?? "n/a", "txt"],
+      ["tax_status", "Tax status", statusCell, "txt"],
     ],
   };
 
@@ -373,6 +381,7 @@ if (typeof document !== "undefined") (function () {
         h("h2", null, addr(r)),
         h("button", { type: "button", class: "icon", "aria-label": "Close details", onclick: () => select(null) }, "✕")),
       r.excluded ? h("p", { class: "note" }, "Excluded: " + (REASONS[r.excluded] || r.excluded)) : null,
+      r.tax_status && !["DEFAULTED", "CURRENT"].includes(r.tax_status) ? h("p", { class: "note" }, "⚑ Tax status " + r.tax_status + ". " + STATUS_NOTE) : null,
       ...money,
       r.segment === "rental" ? h("p", { class: "risks" },
         h("span", null, "Rehab risk: ", risk(r.rehab_risk)), " ", h("small", null, RISK_NOTE.rehab), h("br"),
@@ -394,9 +403,10 @@ if (typeof document !== "undefined") (function () {
     const med = caps.length ? (caps[(caps.length - 1) >> 1] + caps[caps.length >> 1]) / 2 : null;
     const above = elig.filter((r) => r.cap >= state.target).length;
     const excl = rows.filter((r) => r.excluded).length;
+    const flagged = elig.filter((r) => r.tax_status !== "DEFAULTED").length;
     const tiles = [
       ["Parcels in auction", fmtNum(rows.length), `${rows.filter((r) => r.segment === "rental").length} improved · ${rows.filter((r) => r.segment === "land").length} land`],
-      ["Rentals ranked", fmtNum(elig.length), "improved, rentable, still in default"],
+      ["Rentals ranked", fmtNum(elig.length), "improved, rentable, still on the list" + (flagged ? ` · ${flagged} not DEFAULTED ⚑` : "")],
       [`At or above ${fmtPct(state.target, 1)} cap`, fmtNum(above), `when paying ${fmtX(state.m)} the minimum bid`],
       ["Median cap rate", fmtPct(med), "ranked rentals"],
       ["Excluded", fmtNum(excl), "taxes paid, no data, out of scope"],
@@ -495,10 +505,11 @@ if (typeof document !== "undefined") (function () {
   bind("noHighRehab", "noHighRehab", "change", (e) => e.target.checked);
   bind("noHighRedemption", "noHighRedemption", "change", (e) => e.target.checked);
   bind("noFallback", "noFallback", "change", (e) => e.target.checked);
+  bind("onlyDefaulted", "onlyDefaulted", "change", (e) => e.target.checked);
   $("reset").addEventListener("click", () => {
-    Object.assign(state.f, { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false });
+    Object.assign(state.f, { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false });
     $("loc").value = $("type").value = $("q").value = $("minCap").value = $("maxBid").value = "";
-    ["noHighRehab", "noHighRedemption", "noFallback"].forEach((id) => ($(id).checked = false));
+    ["noHighRehab", "noHighRedemption", "noFallback", "onlyDefaulted"].forEach((id) => ($(id).checked = false));
     state.m = auction.assumptions.bid_multiple; state.target = auction.assumptions.target_cap_rate;
     $("m").value = state.m; $("target").value = (state.target * 100).toFixed(1);
     render();

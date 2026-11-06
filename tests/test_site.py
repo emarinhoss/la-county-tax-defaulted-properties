@@ -29,6 +29,9 @@ def test_demo_is_clearly_synthetic_and_has_every_segment(demo):
     assert scored["property_address"].str.contains("DEMO|VACANT").all()
     assert set(scored["segment"]) == {"rental", "land", "review"} or set(scored["segment"]) >= {"rental", "land"}
     assert scored["rank"].notna().sum() > 50
+    assert {"DEFAULTED", "CURRENT", "DELINQUENT"} <= set(scored["tax_status"].dropna())
+    ranked_status = scored[scored["rank"].notna()]["tax_status"]
+    assert "DELINQUENT" in set(ranked_status) and "CURRENT" not in set(ranked_status)   # kept and flagged
     assert {"tax_current", "no_bedroom_data"} <= set(scored["excluded"].dropna())
     assert json.loads((d / "analysis" / "summary.json").read_text())["synthetic"] is True
     hist = pd.read_csv(d / "status_history.csv", dtype=str)

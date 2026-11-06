@@ -108,6 +108,8 @@ def make_demo(out_dir: Path, fmr: pd.DataFrame, *, n_rental: int = 130, n_land: 
     # between the pulls ~7% of parcels paid up (CURRENT) and one failed to fetch
     paid = rng.choice(len(final), size=max(1, int(0.07 * len(final))), replace=False)
     final.loc[paid, "tax_status"] = "CURRENT"
+    rest = np.setdiff1d(np.arange(len(final)), paid)
+    final.loc[rng.choice(rest, size=max(1, int(0.05 * len(final))), replace=False), "tax_status"] = "DELINQUENT"
     final.loc[int(rng.integers(0, len(final))), "fetch_error"] = "HTTP 503"
     final["pulled_at"] = f"{asof.isoformat()}T12:00:00+00:00"
     for df, day in ((first, earlier), (final, asof)):
