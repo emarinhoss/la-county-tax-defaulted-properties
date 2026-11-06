@@ -11,6 +11,7 @@ from .assessor import AssessorClient, BlockedError
 from .analyze import Assumptions, run_analysis
 from .enrich import run_enrichment
 from .fetch import FetchError, download_pdf
+from .geo import GisClient, GisError, geocode_auction
 from .meta import AuctionMeta, save_meta
 from .parse import parse_pdf
 from .refresh import find_auctions, refresh_auction
@@ -106,6 +107,33 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_geocode(args: argparse.Namespace) -> int:
+    auction_dir = Path(args.data_dir) / args.auction
+    if not (auction_dir / "items.csv").exists():
+        print(f"error: {auction_dir / 'items.csv'} not found; run `parse` first.", file=sys.stderr)
+        return 2
+    client = GisClient(args.gis_url, args.ain_field, min_interval=args.delay, batch_size=args.batch_size)
+
+    def progress(done: int, total: int) -> None:
+        print(f"  looked up {done}/{total} parcels", file=sys.stderr)
+
+    try:
+        found, missing, total = geocode_auction(auction_dir, client, progress=progress)
+    except BlockedError as e:
+        print(f"error: {e}\nCoordinates found so far are saved; re-run to continue.", file=sys.stderr)
+        return 3
+    except GisError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"{args.auction}: {found} new, {total - missing}/{total} parcels have coordinates "
+          f"({missing} not found in the GIS layer) -> {auction_dir / 'coordinates.csv'}")
+    if total and total - missing == 0:
+        print("hint: the layer answered but matched nothing. Check --gis-url (a parcel layer's .../query URL) and "
+              "--ain-field, and whether that layer stores AINs as 10 digits without dashes.", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_make_demo(args: argparse.Namespace) -> int:
     fmr = read_fmr_csv(args.fmr)
     if "metro_default" not in fmr:
@@ -131,12 +159,14 @@ def _cmd_refresh(args: argparse.Namespace) -> int:
         print("no auctions with an items.csv; nothing to refresh")
         return 0
     client = AssessorClient(min_interval=args.delay)
+    gis = None if args.no_geocode else GisClient(args.gis_url, args.ain_field, min_interval=args.delay)
     today = date.fromisoformat(args.today) if args.today else date.today()
     results = []
     for d in dirs:
         r = refresh_auction(d, client, cache_dir=Path(args.cache_dir), fmr_path=Path(args.fmr),
                             config_path=Path(args.config) if args.config else None, today=today,
-                            force=args.force, max_age_hours=args.cache_hours, limit=args.limit)
+                            force=args.force, max_age_hours=args.cache_hours, limit=args.limit,
+                            gis_client=gis)
         results.append(r)
         print(f"{r.auction}: {r.status}: {r.detail}")
         if r.status == "blocked":                     # same site for every auction: stop hammering it
@@ -196,6 +226,15 @@ def main(argv: list[str] | None = None) -> int:
     z.add_argument("--top", type=int, default=15, help="rows to print (default 15)")
     z.set_defaults(func=_cmd_analyze)
 
+    g = sub.add_parser("geocode", help="look up parcel centroids from the county GIS (for the map)")
+    g.add_argument("auction")
+    g.add_argument("--data-dir", default="data/auctions")
+    g.add_argument("--gis-url", help="parcel layer query URL (default: LA County public parcel service)")
+    g.add_argument("--ain-field", help="AIN field name in that layer (default AIN)")
+    g.add_argument("--delay", type=float, default=0.5)
+    g.add_argument("--batch-size", type=int, default=50)
+    g.set_defaults(func=_cmd_geocode)
+
     d = sub.add_parser("make-demo", help="write a clearly fake demo auction for trying the dashboard")
     d.add_argument("--out", default="demo/auctions")
     d.add_argument("--fmr", default="data/reference/hud_safmr.csv")
@@ -217,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--today", help="override today's date (YYYY-MM-DD), for testing")
     r.add_argument("--force", action="store_true", help="refresh even if the sale date has passed")
     r.add_argument("--limit", type=int, help="only the first N parcels per auction")
+    r.add_argument("--no-geocode", action="store_true", help="skip the parcel coordinate lookup")
+    r.add_argument("--gis-url", help="parcel layer query URL (default: LA County public parcel service)")
+    r.add_argument("--ain-field", help="AIN field name in that layer (default AIN)")
     r.set_defaults(func=_cmd_refresh)
 
     args = ap.parse_args(argv)

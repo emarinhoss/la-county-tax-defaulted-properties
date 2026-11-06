@@ -77,7 +77,7 @@ def test_find_auctions_filters(tmp_path):
 def run_cli(tmp_path, monkeypatch, handler, *extra):
     monkeypatch.setattr(cli, "AssessorClient", lambda **k: client(handler))
     return main(["refresh", "--data-dir", str(tmp_path / "data"), "--cache-dir", str(tmp_path / "c"),
-                 "--fmr", str(FMR), "--config", "", "--today", "2026-11-06", *extra])
+                 "--fmr", str(FMR), "--config", "", "--today", "2026-11-06", "--no-geocode", *extra])
 
 
 def test_cli_refresh_ok_and_summary(tmp_path, monkeypatch, capsys):

@@ -18,21 +18,21 @@
   },
   "items": 360,
   "by_segment": {
-    "land": 229,
+    "land": 224,
     "rental": 130,
-    "review": 1
+    "review": 6
   },
   "excluded": {
-    "tax_current": 25,
-    "multi_unit_5plus": 4,
-    "no_residential_units": 4,
-    "no_bedroom_data": 3,
-    "enrichment_failed": 1,
-    "improved_flag_without_address": 1
+    "tax_current": 24,
+    "no_residential_units": 8,
+    "no_bedroom_data": 7,
+    "improved_flag_without_address": 5,
+    "multi_unit_5plus": 2,
+    "enrichment_failed": 1
   },
-  "ranked": 107,
-  "median_cap_rate": 0.2147444217788319,
-  "above_target": 96,
+  "ranked": 106,
+  "median_cap_rate": 0.21044825185281021,
+  "above_target": 95,
   "synthetic": true,
   "label": "Synthetic demo data: not real parcels, addresses or prices"
 }

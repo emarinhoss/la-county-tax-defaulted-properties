@@ -85,6 +85,7 @@ if (typeof document !== "undefined") (function () {
     rental: (r) => r.segment === "rental" && !r.excluded,
     land: (r) => r.segment === "land" && !r.excluded,
     excluded: (r) => !!r.excluded,
+    map: () => true,
   };
 
   function passes(r) {
@@ -98,7 +99,7 @@ if (typeof document !== "undefined") (function () {
     }
     if (f.maxBid !== "" && r.min_bid > +f.maxBid) return false;
     if (f.onlyDefaulted && r.tax_status !== "DEFAULTED") return false;
-    if (state.seg === "rental") {
+    if (r.segment === "rental" && !r.excluded) {
       if (f.minCap !== "" && (r.cap == null || r.cap < +f.minCap / 100)) return false;
       if (f.noHighRehab && r.rehab_risk === "high") return false;
       if (f.noHighRedemption && r.redemption_risk === "high") return false;
@@ -388,12 +389,112 @@ if (typeof document !== "undefined") (function () {
         h("span", null, "Redemption risk: ", risk(r.redemption_risk)), " ", h("small", null, RISK_NOTE.redemption)) : null,
       h("h3", null, "Parcel"), h("dl", { class: "kv" }, ...facts),
       h("h3", null, "Before bidding"), h("p", null, r.checklist),
+      r.lat != null && !auction.synthetic ? h("p", null, h("a", { href: `https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lon}`, target: "_blank", rel: "noopener" }, "View on Google Maps ↗")) : null,
       auction.synthetic ? h("p", { class: "note" }, "Synthetic parcel: no Assessor page.")
         : h("p", null, h("a", { href: "https://portal.assessor.lacounty.gov/parceldetail/" + encodeURIComponent(r.ain), target: "_blank", rel: "noopener" }, "Open on the Assessor portal ↗")),
     ].filter(Boolean));
     d.hidden = false;
     d.querySelector("button").focus();
     render();
+  }
+
+  /* ---------- map ---------- */
+  let map = null, markerLayer = null, tileLayer = null, tilesDark = null, lastFitKey = null;
+  const isDark = () => {
+    const t = document.documentElement.dataset.theme;
+    return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  };
+  // one hue, light to dark on the light basemap; reversed on the dark one so "more" is always more prominent
+  const RAMP_LIGHT = ["#86b6ef", "#5598e7", "#3987e5", "#256abf", "#184f95", "#0d366b"];
+  const RAMP_DARK = ["#184f95", "#256abf", "#3987e5", "#5598e7", "#86b6ef", "#b7d3f6"];
+  const kindOf = (r) => (r.excluded ? "excluded" : r.segment === "rental" ? "rental" : "land");
+
+  function capClasses(caps) {
+    const sorted = caps.slice().sort((a, b) => a - b);
+    const n = Math.min(6, Math.max(1, sorted.length));
+    const breaks = [];                                   // lower bound of classes 1..n-1
+    for (let i = 1; i < n; i++) breaks.push(sorted[Math.floor((i * sorted.length) / n)]);
+    return { n, breaks, min: sorted[0], max: sorted[sorted.length - 1] };
+  }
+  const classOf = (cap, c) => c.breaks.filter((b) => cap >= b).length;
+
+  function renderMap(list) {
+    const box = $("map"), note = $("mapNote"), legend = $("legend");
+    if (typeof L === "undefined") {
+      box.replaceChildren(h("p", { class: "empty" }, "The map library could not load (are you offline?). The other tabs still work."));
+      legend.replaceChildren(); note.textContent = "";
+      return;
+    }
+    if (!map) {
+      box.replaceChildren();
+      map = L.map(box, { preferCanvas: true }).setView([34.05, -118.25], 9);
+      markerLayer = L.layerGroup().addTo(map);
+      box.addEventListener("keydown", (e) => { if (e.key === "Escape") map.closePopup(); });
+    }
+    map.invalidateSize();
+    const dark = isDark();
+    if (tilesDark !== dark) {
+      if (tileLayer) map.removeLayer(tileLayer);
+      tileLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
+        subdomains: "abcd", maxZoom: 19, attribution: "© OpenStreetMap contributors © CARTO",
+      }).addTo(map);
+      tilesDark = dark;
+    }
+    markerLayer.clearLayers();
+
+    const on = { rental: $("lyRental").checked, land: $("lyLand").checked, excluded: $("lyExcl").checked };
+    const shown = list.filter((r) => on[kindOf(r)]);
+    const mapped = shown.filter((r) => r.lat != null && r.lon != null);
+    const ramp = dark ? RAMP_DARK : RAMP_LIGHT;
+    const rentals = mapped.filter((r) => kindOf(r) === "rental" && r.cap != null);
+    const cls = capClasses(rentals.map((r) => r.cap));
+    const color = (r) => ramp[Math.min(ramp.length - 1, Math.round((classOf(r.cap, cls) * (ramp.length - 1)) / Math.max(1, cls.n - 1)))];
+    const grey = dark ? "#a09f95" : "#6f6e69";
+    const ringColor = dark ? "#1a1a19" : "#fcfcfb";
+
+    const order = { excluded: 0, land: 1, rental: 2 };            // rentals drawn last, on top
+    mapped.sort((a, b) => order[kindOf(a)] - order[kindOf(b)]).forEach((r) => {
+      const k = kindOf(r), sel = state.selected === r.ain;
+      const style = k === "rental" && r.cap != null
+        ? { radius: sel ? 10 : 7, fillColor: color(r), fillOpacity: 0.92, color: sel ? (dark ? "#f0efec" : "#0b0b0b") : ringColor, weight: sel ? 3 : 1.5 }
+        : k === "land" ? { radius: sel ? 8 : 4, fillColor: grey, fillOpacity: 0.55, color: sel ? ringColor : grey, weight: sel ? 2 : 0 }
+        : { radius: sel ? 8 : 3, fillColor: grey, fillOpacity: 0.3, color: sel ? ringColor : grey, weight: sel ? 2 : 0 };
+      const m = L.circleMarker([r.lat, r.lon], style).addTo(markerLayer);
+      m.bindTooltip(() => h("div", null,
+        h("strong", null, addr(r)),
+        h("div", null, k === "rental" && r.cap != null ? `Min bid ${fmtUsd(r.min_bid)} · cap rate ${fmtPct(r.cap)} (#${r.rank})`
+          : `Min bid ${fmtUsd(r.min_bid)} · ${k === "excluded" ? REASONS[r.excluded] || "excluded" : "land"}`),
+        r.tax_status && r.tax_status !== "DEFAULTED" ? h("div", null, "⚑ " + r.tax_status) : null), { sticky: true });
+      m.on("click", () => select(r.ain));
+    });
+
+    // legend: rentals by cap-rate class, plus the dot kinds
+    const swatch = (c, size = 14) => h("span", { class: "sw", style: `background:${c};width:${size}px;height:${size}px` });
+    const items = [];
+    if (rentals.length) {
+      items.push(h("strong", null, `Rental cap rate at ${fmtX(state.m)} the minimum bid:`));
+      for (let i = 0; i < cls.n; i++) {
+        const lo = i === 0 ? cls.min : cls.breaks[i - 1], hi = i === cls.n - 1 ? cls.max : cls.breaks[i];
+        const c = ramp[Math.min(ramp.length - 1, Math.round((i * (ramp.length - 1)) / Math.max(1, cls.n - 1)))];
+        items.push(h("span", null, swatch(c), cls.n === 1 ? fmtPct(lo) : `${fmtPct(lo, 0)}–${fmtPct(hi, 0)}`));
+      }
+    }
+    items.push(h("span", null, swatch(grey, 9), "land"), h("span", null, swatch(grey, 6), "excluded"));
+    legend.replaceChildren(...items);
+
+    const unmapped = shown.length - mapped.length;
+    box.dataset.markers = mapped.length;
+    if (!rows.some((r) => r.lat != null)) {
+      note.textContent = "No coordinates yet. Run `lacounty-tax geocode " + auction.id + "` (the weekly refresh also does this) and rebuild.";
+    } else {
+      note.textContent = `${fmtNum(mapped.length)} parcel${mapped.length === 1 ? "" : "s"} on the map` +
+        (unmapped ? `; ${fmtNum(unmapped)} matching parcel${unmapped === 1 ? " has" : "s have"} no coordinates (not found in the county GIS layer).` : ".");
+    }
+    const key = JSON.stringify([state.f, on, state.ai]);
+    if (key !== lastFitKey && mapped.length) {
+      map.fitBounds(L.latLngBounds(mapped.map((r) => [r.lat, r.lon])).pad(0.1), { maxZoom: 15 });
+      lastFitKey = key;
+    }
   }
 
   /* ---------- page ---------- */
@@ -453,14 +554,16 @@ if (typeof document !== "undefined") (function () {
   }
 
   function renderControls() {
-    const segCounts = { rental: rows.filter(inSeg.rental).length, land: rows.filter(inSeg.land).length, excluded: rows.filter(inSeg.excluded).length };
+    const segCounts = { rental: rows.filter(inSeg.rental).length, land: rows.filter(inSeg.land).length, excluded: rows.filter(inSeg.excluded).length,
+      map: rows.filter((r) => r.lat != null).length };
     document.querySelectorAll("[data-seg]").forEach((b) => {
       const s = b.dataset.seg;
       b.setAttribute("aria-selected", s === state.seg);
       b.querySelector(".c").textContent = segCounts[s];
     });
-    $("rentalOnly").hidden = state.seg !== "rental";
-    $("typeWrap").hidden = state.seg !== "rental";
+    const rentalish = state.seg === "rental" || state.seg === "map";
+    $("rentalOnly").hidden = !rentalish;
+    $("typeWrap").hidden = !rentalish;
   }
 
   function render() {
@@ -468,8 +571,15 @@ if (typeof document !== "undefined") (function () {
     const list = rows.filter(inSeg[state.seg]).filter(passes);
     renderControls();
     renderKpis(a);
-    renderCharts(list);
-    renderTable(list);
+    const isMap = state.seg === "map";
+    $("mapCard").hidden = !isMap;
+    $("chartsSec").hidden = isMap;
+    $("tableSec").hidden = isMap;
+    if (isMap) renderMap(list);
+    else {
+      renderCharts(list);
+      renderTable(list);
+    }
     $("mval").textContent = fmtX(state.m);
   }
 
@@ -506,6 +616,7 @@ if (typeof document !== "undefined") (function () {
   bind("noHighRedemption", "noHighRedemption", "change", (e) => e.target.checked);
   bind("noFallback", "noFallback", "change", (e) => e.target.checked);
   bind("onlyDefaulted", "onlyDefaulted", "change", (e) => e.target.checked);
+  ["lyRental", "lyLand", "lyExcl"].forEach((id) => $(id).addEventListener("change", render));
   $("reset").addEventListener("click", () => {
     Object.assign(state.f, { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false });
     $("loc").value = $("type").value = $("q").value = $("minCap").value = $("maxBid").value = "";
@@ -526,6 +637,7 @@ if (typeof document !== "undefined") (function () {
   $("theme").addEventListener("click", () => {
     const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     setTheme(dark ? "light" : "dark");
+    if (state.seg === "map") render();
   });
 
   boot();

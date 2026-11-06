@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LA Tax Auction Screen</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <style>/*CSS*/</style>
 </head>
 <body>
@@ -28,6 +30,7 @@
       <button type="button" role="tab" data-seg="rental" aria-selected="true">Rentals <span class="c"></span></button>
       <button type="button" role="tab" data-seg="land" aria-selected="false">Land <span class="c"></span></button>
       <button type="button" role="tab" data-seg="excluded" aria-selected="false">Excluded <span class="c"></span></button>
+      <button type="button" role="tab" data-seg="map" aria-selected="false">Map <span class="c"></span></button>
     </div>
     <div class="row" id="rentalOnly">
       <label class="fld">Expected winning bid, as a multiple of the minimum
@@ -48,12 +51,26 @@
     </div>
   </section>
 
-  <section class="charts" aria-label="Charts">
+  <section class="card" id="mapCard" aria-label="Map" hidden>
+    <div class="maphead">
+      <h2>Parcels on the map</h2>
+      <div class="row">
+        <label class="chk"><input type="checkbox" id="lyRental" checked> Rentals</label>
+        <label class="chk"><input type="checkbox" id="lyLand" checked> Land</label>
+        <label class="chk"><input type="checkbox" id="lyExcl" checked> Excluded</label>
+      </div>
+    </div>
+    <div class="maplegend" id="legend"></div>
+    <div id="map" role="region" aria-label="Map of parcels"></div>
+    <p class="mapnote" id="mapNote"></p>
+  </section>
+
+  <section class="charts" id="chartsSec" aria-label="Charts">
     <div class="card"><h2 id="t1"></h2><div class="chart" id="chart1"></div></div>
     <div class="card"><h2 id="t2"></h2><div class="chart" id="chart2"></div></div>
   </section>
 
-  <section class="card tablecard" aria-label="Parcels">
+  <section class="card tablecard" id="tableSec" aria-label="Parcels">
     <div class="tablehead"><strong>Parcels (click a row for details)</strong><span id="count"></span></div>
     <div class="scroll"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
     <div class="moreWrap"><button type="button" id="more">Show more</button></div>
@@ -66,6 +83,8 @@
 </main>
 <aside id="drawer" aria-label="Parcel details" hidden></aside>
 <div id="tip" role="tooltip" hidden></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script type="application/json" id="data">/*DATA*/</script>
 <script>/*JS*/</script>
 </body>

@@ -17,6 +17,9 @@ from .analyze import Assumptions, run_analysis
 from .enrich import SNAPSHOT_COLUMNS, update_status_history
 
 AUCTION_ID = "DEMO"
+# (lat_min, lat_max, lon_min, lon_max) of a few populated areas; demo points are placed at random inside them
+AREAS = [(33.95, 34.12, -118.45, -118.15), (34.15, 34.30, -118.60, -118.30), (33.76, 33.88, -118.25, -118.10),
+         (34.10, 34.20, -118.20, -118.05), (34.00, 34.10, -118.00, -117.75), (34.55, 34.72, -118.25, -117.90)]
 LOCATIONS = ["COUNTY OF LOS ANGELES"] * 5 + [
     "CITY-LOS ANGELES", "CITY-LOS ANGELES", "CITY-LANCASTER", "CITY-PALMDALE", "CITY-LONG BEACH",
     "CITY-POMONA", "CITY-COMPTON", "CITY-INGLEWOOD", "CITY-PASADENA", "CITY EMP PENSION",
@@ -45,7 +48,7 @@ def make_demo(out_dir: Path, fmr: pd.DataFrame, *, n_rental: int = 130, n_land: 
                 used_ain.add(a)
                 return a
 
-    items, snap = [], []
+    items, snap, coords = [], [], []
     kinds = ["rental"] * n_rental + ["land"] * n_land
     rng.shuffle(kinds)
     for i, kind in enumerate(kinds):
@@ -55,6 +58,9 @@ def make_demo(out_dir: Path, fmr: pd.DataFrame, *, n_rental: int = 130, n_land: 
         loc = str(rng.choice(LOCATIONS))
         street = f"{rng.integers(100, 9999)} DEMO {rng.choice(STREETS)} ST"
         rent_scale = float(rent2.get(zip5, 2900)) / 2900
+        a0, a1, o0, o1 = AREAS[int(rng.integers(len(AREAS)))]
+        coords.append(dict(ain=ain, lat=round(float(rng.uniform(a0, a1)), 6), lon=round(float(rng.uniform(o0, o1)), 6),
+                           source="synthetic", fetched_at=f"{asof.isoformat()}T12:00:00+00:00"))
         row_snap = dict(auction=AUCTION_ID, ain=ain, parcel_status="ACTIVE", fetch_error=None,
                         tax_status="DEFAULTED", tax_defaulted_year=str(rng.integers(2017, 2023)))
         if kind == "rental":
@@ -98,6 +104,7 @@ def make_demo(out_dir: Path, fmr: pd.DataFrame, *, n_rental: int = 130, n_land: 
                         last_transfer_reason="Demo transfer")
         snap.append(row_snap)
 
+    pd.DataFrame(coords).sample(frac=0.97, random_state=seed).to_csv(auction_dir / "coordinates.csv", index=False)  # a few unmapped
     items_df = pd.DataFrame(items)
     items_df.to_csv(auction_dir / "items.csv", index=False)
 

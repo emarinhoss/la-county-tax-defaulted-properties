@@ -7,12 +7,14 @@ from pathlib import Path
 
 import pandas as pd
 
+from .geo import read_coordinates
+
 ROW_COLUMNS = [
     "item", "ain", "segment", "property_type", "min_bid", "property_address", "zip", "location",
     "tax_status", "year_built", "sqft_main", "sqft_lot", "num_units", "num_beds", "num_baths",
     "land_value", "imp_value", "assessed_value", "bid_to_assessed", "bid_per_lot_sqft",
     "est_monthly_rent", "rehab_estimate", "rehab_risk", "redemption_risk", "fmr_metro_default",
-    "excluded", "checklist",
+    "excluded", "checklist", "lat", "lon",
 ]
 
 
@@ -23,6 +25,10 @@ def load_auction(auction_dir: Path) -> dict | None:
         return None
     meta = json.loads(summary.read_text())
     df = pd.read_csv(scored, dtype={"ain": str, "zip": str})
+    coords = read_coordinates(auction_dir)
+    if len(coords):                       # parcels without a coordinate simply get null lat/lon
+        df = df.drop(columns=["lat", "lon"], errors="ignore").merge(
+            coords[["ain", "lat", "lon"]].drop_duplicates("ain"), on="ain", how="left")
     df = df.reindex(columns=ROW_COLUMNS)
     return {
         "id": meta["auction"],

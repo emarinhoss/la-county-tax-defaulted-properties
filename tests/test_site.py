@@ -72,7 +72,7 @@ def test_embedded_data_cannot_break_out_of_script_tag():
             "assumptions": {}, "rows": []}
     html = render_html([evil])
     assert "</script><script>alert(1)" not in html
-    assert html.count("<script") == 2                          # data + code only
+    assert html.count("<script") == 3                          # leaflet + data + code only
     assert "\\u003c/script>\\u003cscript>alert(1)" in html
 
 
@@ -103,3 +103,11 @@ def test_js_money_model_matches_python(demo):
             assert js["noi"] == pytest.approx(py["noi"])
     # at m = 1 the JS value is what the pipeline wrote to scored.csv
     assert [x["cap"] for x in out[0]] == pytest.approx(list(r["cap_rate"]))
+
+
+def test_page_pins_leaflet_with_integrity_hashes_and_has_a_map_tab(demo):
+    html = render_html(collect([demo[1]]))
+    assert "leaflet@1.9.4/dist/leaflet.js" in html and "leaflet@1.9.4/dist/leaflet.css" in html
+    assert "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" in html      # leaflet.js 1.9.4
+    assert "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" in html      # leaflet.css 1.9.4
+    assert 'data-seg="map"' in html and 'id="mapCard"' in html

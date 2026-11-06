@@ -124,7 +124,30 @@ lacounty-tax refresh          # same command CI runs
 git add data && git commit -m "Refresh data" && git push
 ```
 
+## Map
+
+The dashboard's **Map** tab plots every parcel that has coordinates: rentals colored by cap-rate class (one blue hue,
+recomputed with the bid slider and filters), land and excluded parcels as small grey dots, with hover tooltips and a click
+through to the detail drawer. The layer checkboxes and all filters apply; the note under the map says how many matching
+parcels have no coordinates.
+
+Coordinates come from LA County's public parcel GIS service (parcel polygon centroid by AIN), so vacant lots without a street
+address are mapped too:
+
+```bash
+lacounty-tax geocode 2026B     # -> data/auctions/2026B/coordinates.csv (only missing AINs are looked up)
+```
+
+The weekly refresh runs this step too (`--no-geocode` skips it) and never fails because of it. Coordinates never change, so they
+are looked up once per parcel.
+
+- **Not yet run against the live service.** The default layer URL and the `AIN` field name are best known values. If the first run
+  reports errors or matches nothing, pass `--gis-url` (a parcel layer's `.../query` URL) and `--ain-field`, or set
+  `LACOUNTY_GIS_URL` / `LACOUNTY_GIS_AIN_FIELD`. Parcels the layer doesn't contain (some condo units, for example) stay unmapped.
+- **Needs internet in the browser.** Leaflet 1.9.4 loads from unpkg with integrity hashes and street tiles from CARTO/OpenStreetMap.
+  Offline, the Map tab shows a message and the rest of the page works.
+
 ## Roadmap
 
-All five phases are in place. Ideas not built: automatic discovery of new auction books, a map, winning-bid history,
-alerts, Census rent cross-checks.
+All five phases plus the map are in place. Ideas not built: automatic discovery of new auction books, winning-bid history
+(to calibrate the bid multiple), alerts, Census rent cross-checks.
