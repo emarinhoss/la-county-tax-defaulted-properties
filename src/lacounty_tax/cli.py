@@ -2,14 +2,18 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from datetime import date
 from pathlib import Path
 
 from .assessor import AssessorClient, BlockedError
 from .analyze import Assumptions, run_analysis
 from .enrich import run_enrichment
 from .fetch import FetchError, download_pdf
+from .meta import AuctionMeta, save_meta
 from .parse import parse_pdf
+from .refresh import find_auctions, refresh_auction
 from .site import build_site
 from .synthetic import make_demo
 from .reference import load_safmr_xlsx, parse_safmr_text, read_fmr_csv
@@ -26,6 +30,8 @@ def _cmd_parse(args: argparse.Namespace) -> int:
     t = result.table
     print(f"{result.auction}: {len(t)} items, {int(t['improved'].sum())} improved, "
           f"{int(t['vacant_lot'].sum())} vacant -> {out}")
+    if args.sale_date or args.book_url:
+        save_meta(out.parent, AuctionMeta(result.auction, args.sale_date, args.book_url))
     for w in result.warnings:
         print(f"warning: {w}", file=sys.stderr)
     return 1 if (result.warnings and args.strict) else 0
@@ -119,6 +125,34 @@ def _cmd_build_site(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_refresh(args: argparse.Namespace) -> int:
+    dirs = find_auctions(Path(args.data_dir), args.auction)
+    if not dirs:
+        print("no auctions with an items.csv; nothing to refresh")
+        return 0
+    client = AssessorClient(min_interval=args.delay)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    results = []
+    for d in dirs:
+        r = refresh_auction(d, client, cache_dir=Path(args.cache_dir), fmr_path=Path(args.fmr),
+                            config_path=Path(args.config) if args.config else None, today=today,
+                            force=args.force, max_age_hours=args.cache_hours, limit=args.limit)
+        results.append(r)
+        print(f"{r.auction}: {r.status}: {r.detail}")
+        if r.status == "blocked":                     # same site for every auction: stop hammering it
+            break
+    blocked = any(r.status == "blocked" for r in results)
+    if blocked and os.environ.get("GITHUB_ACTIONS"):
+        print("::warning title=Assessor site blocked this runner::Data was not refreshed; "
+              "run `lacounty-tax enrich` from your own machine and commit the result.")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a") as fh:
+            fh.write("### Refresh\n\n| Auction | Status | Detail |\n|---|---|---|\n")
+            fh.writelines(f"| {r.auction} | {r.status} | {r.detail} |\n" for r in results)
+    return 3 if blocked else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="lacounty-tax")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -128,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--auction", help="auction id such as 2026B (detected from the PDF by default)")
     p.add_argument("--out", help="output CSV (default data/auctions/<auction>/items.csv)")
     p.add_argument("--strict", action="store_true", help="exit non-zero if any warning is raised")
+    p.add_argument("--sale-date", help="last day of the sale (YYYY-MM-DD); scheduled refreshes stop after it")
+    p.add_argument("--book-url", help="where the book came from, recorded in meta.json")
     p.set_defaults(func=_cmd_parse)
 
     f = sub.add_parser("fetch", help="download an auction book PDF")
@@ -169,6 +205,19 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--data-dir", action="append", help="folder of auctions; repeatable (default data/auctions)")
     w.add_argument("--out", default="docs")
     w.set_defaults(func=_cmd_build_site)
+
+    r = sub.add_parser("refresh", help="re-pull Assessor data for active auctions and re-score them (used by CI)")
+    r.add_argument("--auction", action="append", help="only this auction id; repeatable (default: all)")
+    r.add_argument("--data-dir", default="data/auctions")
+    r.add_argument("--cache-dir", default=".cache/assessor")
+    r.add_argument("--cache-hours", type=float, default=12.0)
+    r.add_argument("--delay", type=float, default=0.5)
+    r.add_argument("--fmr", default="data/reference/hud_safmr.csv")
+    r.add_argument("--config", default="config/assumptions.toml")
+    r.add_argument("--today", help="override today's date (YYYY-MM-DD), for testing")
+    r.add_argument("--force", action="store_true", help="refresh even if the sale date has passed")
+    r.add_argument("--limit", type=int, help="only the first N parcels per auction")
+    r.set_defaults(func=_cmd_refresh)
 
     args = ap.parse_args(argv)
     return args.func(args)

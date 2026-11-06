@@ -1,0 +1,106 @@
+name: Refresh and publish
+
+# Weekly: re-pull Assessor data for auctions still before their sale date, re-score,
+# commit the data, rebuild the dashboard and deploy it to GitHub Pages.
+# Manual run: optionally ingest a new auction book first (book_url, sale_date).
+on:
+  schedule:
+    - cron: "17 14 * * 1"   # Mondays 14:17 UTC
+  workflow_dispatch:
+    inputs:
+      book_url:
+        description: "URL of a new auction book PDF to ingest first (optional)"
+        required: false
+        type: string
+      sale_date:
+        description: "Last day of that sale, YYYY-MM-DD (refreshes stop after it)"
+        required: false
+        type: string
+      force:
+        description: "Refresh even auctions whose sale date has passed"
+        type: boolean
+        default: false
+
+concurrency:
+  group: refresh-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+
+      - name: Ingest new auction book
+        if: ${{ inputs.book_url != '' }}
+        env:
+          BOOK_URL: ${{ inputs.book_url }}
+          SALE_DATE: ${{ inputs.sale_date }}
+        run: |
+          lacounty-tax fetch "$BOOK_URL" --dest "$RUNNER_TEMP/book.pdf"
+          args=()
+          if [ -n "$SALE_DATE" ]; then args+=(--sale-date "$SALE_DATE"); fi
+          lacounty-tax parse "$RUNNER_TEMP/book.pdf" --book-url "$BOOK_URL" --strict "${args[@]}"
+
+      - name: Refresh Assessor data and re-score
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          set +e
+          args=()
+          if [ "$FORCE" = "true" ]; then args+=(--force); fi
+          lacounty-tax refresh "${args[@]}"
+          code=$?
+          # 3 = the Assessor site blocked this runner: warn (annotation + summary) but still publish
+          [ "$code" = "0" ] || [ "$code" = "3" ]
+
+      - name: Commit refreshed data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "no data changes"
+          else
+            git commit -m "Refresh auction data ($(date -u +%F))"
+            git pull --rebase origin "$GITHUB_REF_NAME"
+            git push origin "HEAD:$GITHUB_REF_NAME"
+          fi
+
+      - name: Build dashboard
+        run: |
+          set +e
+          lacounty-tax build-site --out _site
+          code=$?
+          if [ "$code" = "2" ]; then
+            echo "::warning title=No analyzed auctions yet::Publishing the synthetic demo dashboard instead."
+            lacounty-tax build-site --data-dir demo/auctions --out _site
+          else
+            exit "$code"
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: refresh
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
