@@ -58,7 +58,7 @@ Writes `data/auctions/<id>/analysis/scored.csv` and `summary.json`.
   residential units, more than 4 units, no HUD rent for the ZIP, no bedroom count.
 - **Rent:** HUD SAFMR by ZIP and bedrooms. About 37% of LA ZIPs carry HUD's identical metro-wide fallback row;
   those are flagged `fmr_metro_default` and are not ZIP-specific.
-  Multi-unit splits bedrooms evenly across units).
+  Multi-unit properties split their bedrooms evenly across units.
 - **Return:** `cap_rate` at `min_bid * bid_multiple`, `max_bid_for_target` (the highest bid that still
   meets `target_cap_rate`) and `bid_headroom` (that, divided by the minimum bid). Rank = cap rate.
 - **Risk columns:** `rehab_risk` (age and structure-to-land assessed value), `redemption_risk` (recent
