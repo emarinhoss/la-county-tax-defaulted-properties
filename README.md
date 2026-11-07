@@ -181,7 +181,7 @@ for 2022A through 2025B (item, AIN, minimum bid, address with shapes).
   (`services.arcgis.com/RmCCgQtiZLDCtblq/.../admin_dist_SDE_DIST_DRP_CITY_COMM_BDY/FeatureServer/0`, the default; override with `--url`). That host
   answered GitHub Actions runners in `la-county-elections`, unlike the county's own web servers. Commit the result and rebuild; the map then shows a "City boundaries" checkbox.
   The loader has been run on the real downloaded file (88 cities; 17 landmark checks all land in the right city; simplification error
-  under 0.5% of area). `fetch-boundaries` has not been run against the live service. `tests/fixtures/la_city_layer_attributes.csv` is
+  under 0.5% of area). `fetch-boundaries` was run against the live ArcGIS layer and returned the same 88 cities. `tests/fixtures/la_city_layer_attributes.csv` is
   the layer's attribute table, used to test field detection.
 - **Background: solid colour + elevation, no map service.** By default the map needs no external service at all: the county is a solid
   land colour on a grey surround, with a shaded-relief (hillshade) image of the terrain on top, the dashed county outline, the city lines
