@@ -170,6 +170,48 @@ def fetch_cities(url: str, *, name_field: str | None = None, include_unincorpora
             "features": clean_features(raw, name_field=name_field, include_unincorporated=include_unincorporated, simplify=simplify)}
 
 
+def county_outline(features: list[dict], *, simplify: float = 0.0003, min_sq_mi: float = 0.5) -> dict:
+    """Dissolve every polygon of the county layer (cities and unincorporated areas) into the county outline.
+
+    The layer's shapes don't quite touch, which leaves thousands of sliver holes, so holes are filled
+    (LA County has no enclaves) and specks below ``min_sq_mi`` are dropped; the islands survive.
+    Needs shapely (``pip install -e '.[geo]'``); it is used only for this one-off step.
+    """
+    try:
+        from shapely.geometry import MultiPolygon, Polygon, mapping, shape
+        from shapely.ops import unary_union
+    except ImportError as e:                                   # pragma: no cover - depends on the environment
+        raise GisError("--county-out needs shapely: pip install -e '.[geo]'") from e
+    geoms = [shape(f["geometry"]).buffer(0) for f in features if f.get("geometry")]
+    if not geoms:
+        raise GisError("no geometries to dissolve")
+    union = unary_union(geoms)
+    parts = list(union.geoms) if hasattr(union, "geoms") else [union]
+    keep = []
+    for g in parts:
+        k = 69.0 * math.cos(math.radians(g.centroid.y)) * 69.0     # square miles per square degree
+        if g.area * k >= min_sq_mi:
+            keep.append(Polygon(g.exterior).simplify(simplify, preserve_topology=True))   # exterior only: fills holes
+    if not keep:
+        raise GisError("the dissolved outline is empty")
+    geom = mapping(MultiPolygon(keep) if len(keep) > 1 else keep[0])
+    geom = {"type": geom["type"], "coordinates": json.loads(json.dumps(geom["coordinates"]))}
+    geom = simplify_geometry(geom, 0)                          # round to 4 decimals, drop degenerate rings
+    return {"type": "FeatureCollection", "features": [{
+        "type": "Feature",
+        "properties": {"name": "Los Angeles County", "fips": "06037",
+                       "source": "LA County GeoHub City and Community Boundaries, all polygons dissolved"},
+        "geometry": geom}]}
+
+
+def load_county_outline(path: Path, **kw) -> dict:
+    data = json.loads(Path(path).read_text())
+    feats = data.get("features") if isinstance(data, dict) else None
+    if not feats:
+        raise GisError(f"{path}: not a GeoJSON FeatureCollection with features")
+    return county_outline(feats, **kw)
+
+
 def write_geojson(fc: dict, out: Path) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(fc, separators=(",", ":")))

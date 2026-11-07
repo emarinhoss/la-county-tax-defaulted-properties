@@ -144,23 +144,27 @@ are looked up once per parcel.
 - **Not yet run against the live service.** The default layer URL and the `AIN` field name are best known values. If the first run
   reports errors or matches nothing, pass `--gis-url` (a parcel layer's `.../query` URL) and `--ain-field`, or set
   `LACOUNTY_GIS_URL` / `LACOUNTY_GIS_AIN_FIELD`. Parcels the layer doesn't contain (some condo units, for example) stay unmapped.
-- **County outline and limits.** The map draws a dashed Los Angeles County outline (`data/reference/boundaries/la_county.geojson`,
-  from the Census Bureau's cartographic boundaries via the `us-atlas` package) and limits panning and zooming to the county and its
-  surroundings. The outline is heavily generalized (1:10,000,000): fine for orientation, not exact along the border. City boundaries
-  come from the county's own "City and Community Boundaries" layer (88 incorporated cities plus unincorporated areas). The easiest way,
+- **County outline and limits.** The map draws a dashed Los Angeles County outline (`data/reference/boundaries/la_county.geojson`) and limits
+  panning and zooming to the county and its surroundings. The outline is made by dissolving every polygon of the county's own
+  "City and Community Boundaries" layer (about 4,075 sq mi, following the coastline; thousands of sliver holes between neighbouring
+  shapes are filled and specks dropped). That step needs shapely: `pip install -e '.[geo]'`, then add `--county-out` to `load-boundaries`.
+- **City boundaries** come from the county's own "City and Community Boundaries" layer (88 incorporated cities plus unincorporated areas). The easiest way,
   with no API URL and no network access from this tool:
 
   ```bash
   # On LA County GeoHub open the dataset, choose Download -> GeoJSON (the CSV download has no shapes), then:
-  lacounty-tax load-boundaries city_layer.geojson     # -> data/reference/boundaries/la_cities.geojson
+  lacounty-tax load-boundaries city_layer.geojson --county-out data/reference/boundaries/la_county.geojson
+  # -> data/reference/boundaries/la_cities.geojson (88 cities) and la_county.geojson (dissolved outline)
   ```
 
   By default only the 88 incorporated cities are kept. `--include-unincorporated` also keeps communities and islands (dotted lines),
   but never the large "AREA" regions (Antelope Valley, Santa Clarita Valley, ...) that overlap the cities. Shapes are simplified to
   about 20 m (`--simplify`). The name field is detected by which candidate is actually filled in (`CITY_COMM_NAME` in this layer;
   override with `--name-field`). Alternatively `lacounty-tax fetch-boundaries --url <layer URL>` downloads straight from the ArcGIS
-  layer. Commit the result and rebuild; the map then shows a "City boundaries" checkbox. Neither command has been run on the layer's
-  real shapes yet; `tests/fixtures/la_city_layer_attributes.csv` is the layer's attribute table, used to test field detection.
+  layer. Commit the result and rebuild; the map then shows a "City boundaries" checkbox.
+  The loader has been run on the real downloaded file (88 cities; 17 landmark checks all land in the right city; simplification error
+  under 0.5% of area). `fetch-boundaries` has not been run against the live service. `tests/fixtures/la_city_layer_attributes.csv` is
+  the layer's attribute table, used to test field detection.
 - **Basemap trouble.** If street tiles cannot load, the map retries with plain OpenStreetMap and then shows a visible warning. Tile
   servers refuse requests with no web address, so open the published site (or serve the folder with `python3 -m http.server`), not
   `_site/index.html` straight from disk.

@@ -11,7 +11,7 @@ from .assessor import AssessorClient, BlockedError
 from .analyze import Assumptions, run_analysis
 from .enrich import run_enrichment
 from .fetch import FetchError, download_pdf
-from .boundaries import load_geojson, write_cities, write_geojson
+from .boundaries import load_county_outline, load_geojson, write_cities, write_geojson
 from .geo import GisClient, GisError, geocode_auction
 from .meta import AuctionMeta, save_meta
 from .parse import parse_pdf
@@ -162,6 +162,14 @@ def _cmd_load_boundaries(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     n = write_geojson(fc, Path(args.out))
+    if args.county_out:
+        try:
+            county = load_county_outline(Path(args.geojson))
+        except (GisError, OSError, ValueError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        write_geojson(county, Path(args.county_out))
+        print(f"county outline (all polygons dissolved) -> {args.county_out}")
     kinds = {k: sum(f["properties"]["kind"] == k for f in fc["features"]) for k in ("city", "unincorporated")}
     print(f"{n} polygons ({kinds['city']} cities, {kinds['unincorporated']} unincorporated) -> {args.out}")
     return 0
@@ -284,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     lb.add_argument("--simplify", type=float, default=0.0002, help="simplification tolerance in degrees (default ~20 m)")
     lb.add_argument("--include-unincorporated", action="store_true",
                     help="also keep unincorporated communities and islands (never the large AREA regions)")
+    lb.add_argument("--county-out", help="also dissolve all polygons into the county outline (needs shapely: pip install -e '.[geo]')")
     lb.add_argument("--out", default="data/reference/boundaries/la_cities.geojson")
     lb.set_defaults(func=_cmd_load_boundaries)
 

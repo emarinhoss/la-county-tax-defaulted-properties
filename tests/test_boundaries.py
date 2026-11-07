@@ -167,3 +167,63 @@ def test_load_geojson_file_and_cli(tmp_path, capsys):
     bad.write_text('{"nope": 1}')
     assert main(["load-boundaries", str(bad), "--out", str(out)]) == 1
     assert main(["load-boundaries", str(tmp_path / "missing.geojson"), "--out", str(out)]) == 1
+
+
+# ---------- county outline (dissolve) and the committed data files ----------
+BOUNDS = Path(__file__).parents[1] / "data" / "reference" / "boundaries"
+
+
+def poly(x0, y0, x1, y1):
+    return {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": [[[x0, y0], [x0, y1], [x1, y1], [x1, y0], [x0, y0]]]}}
+
+
+def test_county_outline_fills_slivers_and_drops_specks():
+    pytest.importorskip("shapely")
+    from lacounty_tax.boundaries import county_outline
+    a, b = poly(-118.5, 34.0, -118.30, 34.2), poly(-118.30, 34.0, -118.1, 34.2)       # neighbours sharing an edge
+    hole = {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": [
+        [[-118.5, 33.5], [-118.5, 33.7], [-118.3, 33.7], [-118.3, 33.5], [-118.5, 33.5]],
+        [[-118.42, 33.58], [-118.42, 33.62], [-118.38, 33.62], [-118.38, 33.58], [-118.42, 33.58]]]}}
+    speck = poly(-118.0, 34.5, -117.9995, 34.5005)
+    fc = county_outline([a, b, hole, speck], simplify=0.0001)
+    geom = fc["features"][0]["geometry"]
+    parts = [geom["coordinates"]] if geom["type"] == "Polygon" else geom["coordinates"]
+    assert len(parts) == 2                                        # merged neighbours + the holed square; speck gone
+    assert all(len(rings) == 1 for rings in parts)                # no holes left anywhere
+    assert fc["features"][0]["properties"]["fips"] == "06037"
+
+
+def test_committed_city_file_is_88_named_cities_in_the_right_places():
+    fc = json.loads((BOUNDS / "la_cities.geojson").read_text())
+    names = [f["properties"]["name"] for f in fc["features"]]
+    assert len(names) == 88 and len(set(names)) == 88 and all(names)
+    assert {f["properties"]["kind"] for f in fc["features"]} == {"city"}
+    by_name = {f["properties"]["name"]: f["geometry"] for f in fc["features"]}
+
+    def inside(pt, g):
+        polys = [g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]
+        x, y = pt
+        c = False
+        for rings in polys:
+            for ring in rings:
+                for (x0, y0), (x1, y1) in zip(ring, ring[1:]):
+                    if (y0 > y) != (y1 > y) and x < (x1 - x0) * (y - y0) / (y1 - y0) + x0:
+                        c = not c
+        return c
+    for label, lat, lon, city in [("Downtown LA", 34.0522, -118.2437, "LOS ANGELES"), ("Long Beach", 33.77, -118.19, "LONG BEACH"),
+                                  ("Pasadena", 34.1478, -118.1445, "PASADENA"), ("Palmdale", 34.5794, -118.1165, "PALMDALE"),
+                                  ("Avalon", 33.3428, -118.3278, "AVALON"), ("Malibu", 34.0259, -118.7798, "MALIBU")]:
+        assert [n for n, g in by_name.items() if inside((lon, lat), g)] == [city], label
+
+
+def test_every_city_lies_inside_the_county_outline():
+    shapely = pytest.importorskip("shapely")
+    from shapely.geometry import shape
+    cities = json.loads((BOUNDS / "la_cities.geojson").read_text())["features"]
+    county = shape(json.loads((BOUNDS / "la_county.geojson").read_text())["features"][0]["geometry"])
+    outside = [f["properties"]["name"] for f in cities if not county.contains(shape(f["geometry"]).representative_point())]
+    assert outside == []
+    # and the outline is not wildly bigger than the cities' own footprint region: ~4,058 sq mi of land
+    import math
+    sq_mi = county.area * 69.0 * math.cos(math.radians(county.centroid.y)) * 69.0
+    assert 3900 < sq_mi < 4250

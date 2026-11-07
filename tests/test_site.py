@@ -143,7 +143,7 @@ def test_county_outline_matches_known_places(name, lat, lon, expected):
 def test_boundaries_are_embedded_and_optional(demo, tmp_path):
     from lacounty_tax.site import load_boundaries
     b = load_boundaries(BOUNDARIES)
-    assert b["county"]["features"] and b["cities"] is None           # cities file not shipped (yet)
+    assert b["county"]["features"] and len(b["cities"]["features"]) == 88
     assert load_boundaries(tmp_path) == {"county": None, "cities": None}
     assert load_boundaries(None) == {"county": None, "cities": None}
     out = build_site([demo[1]], tmp_path / "site", BOUNDARIES)
