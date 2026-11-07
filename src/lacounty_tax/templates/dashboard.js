@@ -400,7 +400,7 @@ if (typeof document !== "undefined") (function () {
 
   /* ---------- map ---------- */
   let map = null, markerLayer = null, tileLayer = null, tilesDark = null, lastFitKey = null;
-  let countyLayer = null, tilesOk = 0, tilesBad = 0, usedFallback = false;
+  let countyLayer = null, citiesLayer = null, tilesOk = 0, tilesBad = 0, usedFallback = false;
   const TILES = {
     light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
     dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
@@ -429,6 +429,15 @@ if (typeof document !== "undefined") (function () {
       w.hidden = false;
     });
   }
+
+  function addCities() {
+    const cities = DATA.boundaries && DATA.boundaries.cities;
+    if (!cities) return;
+    citiesLayer = L.geoJSON(cities, { interactive: false, style: cityStyle() });
+    $("lyCitiesWrap").hidden = false;
+    $("map").dataset.cities = String(cities.features.length);
+  }
+  const cityStyle = () => ({ color: isDark() ? "#a09f95" : "#6f6e69", weight: 1, opacity: 0.75, fill: false });
 
   function addCounty() {
     const county = DATA.boundaries && DATA.boundaries.county;
@@ -471,7 +480,9 @@ if (typeof document !== "undefined") (function () {
     if (!map) {
       box.replaceChildren();
       map = L.map(box, { preferCanvas: true }).setView([34.05, -118.25], 9);
-      addCounty();                                        // beneath the markers
+      addCities();                                        // boundaries sit beneath the markers, cities under the county line
+      if (citiesLayer && $("lyCities").checked) citiesLayer.addTo(map);
+      addCounty();
       markerLayer = L.layerGroup().addTo(map);
       box.addEventListener("keydown", (e) => { if (e.key === "Escape") map.closePopup(); });
     }
@@ -481,9 +492,15 @@ if (typeof document !== "undefined") (function () {
       usedFallback ? addTiles(TILES.fallback, "© OpenStreetMap contributors")
         : addTiles(dark ? TILES.dark : TILES.light, "© OpenStreetMap contributors © CARTO", "abcd");
       if (countyLayer) countyLayer.setStyle(countyStyle());
+      if (citiesLayer) citiesLayer.setStyle(cityStyle());
       tilesDark = dark;
     }
     markerLayer.clearLayers();
+    if (citiesLayer) {
+      const want = $("lyCities").checked;
+      if (want && !map.hasLayer(citiesLayer)) { citiesLayer.addTo(map); if (countyLayer) countyLayer.bringToFront(); }
+      if (!want && map.hasLayer(citiesLayer)) map.removeLayer(citiesLayer);
+    }
 
     const on = { rental: $("lyRental").checked, land: $("lyLand").checked, excluded: $("lyExcl").checked };
     const shown = list.filter((r) => on[kindOf(r)]);
@@ -660,7 +677,7 @@ if (typeof document !== "undefined") (function () {
   bind("noHighRedemption", "noHighRedemption", "change", (e) => e.target.checked);
   bind("noFallback", "noFallback", "change", (e) => e.target.checked);
   bind("onlyDefaulted", "onlyDefaulted", "change", (e) => e.target.checked);
-  ["lyRental", "lyLand", "lyExcl"].forEach((id) => $(id).addEventListener("change", render));
+  ["lyRental", "lyLand", "lyExcl", "lyCities"].forEach((id) => $(id).addEventListener("change", render));
   $("reset").addEventListener("click", () => {
     Object.assign(state.f, { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false });
     $("loc").value = $("type").value = $("q").value = $("minCap").value = $("maxBid").value = "";

@@ -106,14 +106,17 @@ class GisClient:
 
     def _query(self, ains: list[str]) -> dict:
         quoted = ",".join(f"'{a}'" for a in ains)
-        params = {
+        return self.request({
             "where": f"{self.ain_field} IN ({quoted})",
             "outFields": self.ain_field,
             "returnGeometry": "true",
             "outSR": "4326",
             "geometryPrecision": "6",
             "f": "json",
-        }
+        })
+
+    def request(self, params: dict) -> dict:
+        """GET the service with retries; raises BlockedError / GisError, returns the parsed JSON."""
         last_err = "no attempt made"
         for attempt in range(self.retries + 1):
             if attempt:

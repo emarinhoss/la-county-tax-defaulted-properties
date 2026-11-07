@@ -11,6 +11,7 @@ from .assessor import AssessorClient, BlockedError
 from .analyze import Assumptions, run_analysis
 from .enrich import run_enrichment
 from .fetch import FetchError, download_pdf
+from .boundaries import write_cities
 from .geo import GisClient, GisError, geocode_auction
 from .meta import AuctionMeta, save_meta
 from .parse import parse_pdf
@@ -134,6 +135,24 @@ def _cmd_geocode(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_fetch_boundaries(args: argparse.Namespace) -> int:
+    url = args.url or os.environ.get("LACOUNTY_CITIES_URL")
+    if not url:
+        print("error: pass --url (or set LACOUNTY_CITIES_URL): the query URL of the county's city boundary layer.\n"
+              "Find it on LA County GeoHub: 'City Boundaries' -> I want to use this -> API resources.", file=sys.stderr)
+        return 2
+    try:
+        n = write_cities(url, Path(args.out), name_field=args.name_field, simplify=args.simplify)
+    except BlockedError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    except GisError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"{n} city polygons -> {args.out}")
+    return 0
+
+
 def _cmd_make_demo(args: argparse.Namespace) -> int:
     fmr = read_fmr_csv(args.fmr)
     if "metro_default" not in fmr:
@@ -235,6 +254,13 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--delay", type=float, default=0.5)
     g.add_argument("--batch-size", type=int, default=50)
     g.set_defaults(func=_cmd_geocode)
+
+    b = sub.add_parser("fetch-boundaries", help="download city boundaries for the map from the county's GIS layer")
+    b.add_argument("--url", help="city boundary layer URL (or set LACOUNTY_CITIES_URL)")
+    b.add_argument("--name-field", help="attribute holding the city name (detected by default)")
+    b.add_argument("--simplify", type=float, default=0.0002, help="simplification tolerance in degrees (default ~20 m)")
+    b.add_argument("--out", default="data/reference/boundaries/la_cities.geojson")
+    b.set_defaults(func=_cmd_fetch_boundaries)
 
     d = sub.add_parser("make-demo", help="write a clearly fake demo auction for trying the dashboard")
     d.add_argument("--out", default="demo/auctions")

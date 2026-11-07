@@ -147,7 +147,16 @@ are looked up once per parcel.
 - **County outline and limits.** The map draws a dashed Los Angeles County outline (`data/reference/boundaries/la_county.geojson`,
   from the Census Bureau's cartographic boundaries via the `us-atlas` package) and limits panning and zooming to the county and its
   surroundings. The outline is heavily generalized (1:10,000,000): fine for orientation, not exact along the border. City boundaries
-  are not drawn yet; a `la_cities.geojson` in the same folder would be picked up automatically.
+  come from the county's own city layer, downloaded once:
+
+  ```bash
+  # URL: LA County GeoHub -> "City Boundaries" -> I want to use this -> API resources -> the layer URL ending in /<number>
+  lacounty-tax fetch-boundaries --url "https://.../MapServer/<n>"   # -> data/reference/boundaries/la_cities.geojson
+  ```
+
+  Commit that file and rebuild; the map then shows a "City boundaries" checkbox. The command pages through the layer, detects the
+  name field (or pass `--name-field`), simplifies shapes to about 20 m, and stops with a clear message if the layer looks wrong. It has
+  not been run against the live service.
 - **Basemap trouble.** If street tiles cannot load, the map retries with plain OpenStreetMap and then shows a visible warning. Tile
   servers refuse requests with no web address, so open the published site (or serve the folder with `python3 -m http.server`), not
   `_site/index.html` straight from disk.
