@@ -111,3 +111,43 @@ def test_page_pins_leaflet_with_integrity_hashes_and_has_a_map_tab(demo):
     assert "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" in html      # leaflet.js 1.9.4
     assert "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" in html      # leaflet.css 1.9.4
     assert 'data-seg="map"' in html and 'id="mapCard"' in html
+
+
+BOUNDARIES = ROOT / "data" / "reference" / "boundaries"
+
+
+def _inside(pt, polygons):
+    x, y = pt
+    c = False
+    for rings in polygons:                       # even-odd rule over outer rings and holes
+        for ring in rings:
+            for (x0, y0), (x1, y1) in zip(ring, ring[1:]):
+                if (y0 > y) != (y1 > y) and x < (x1 - x0) * (y - y0) / (y1 - y0) + x0:
+                    c = not c
+    return c
+
+
+@pytest.mark.parametrize("name,lat,lon,expected", [
+    ("Downtown LA", 34.05, -118.25, True), ("Palmdale", 34.58, -118.12, True), ("Lancaster", 34.70, -118.14, True),
+    ("Santa Clarita", 34.39, -118.54, True), ("Long Beach", 33.77, -118.19, True), ("Malibu", 34.03, -118.78, True),
+    ("Pomona", 34.06, -117.75, True), ("Avalon, Catalina", 33.34, -118.33, True),
+    ("Thousand Oaks", 34.17, -118.84, False), ("Santa Ana", 33.75, -117.87, False),
+    ("Fontana", 34.09, -117.43, False), ("Brea", 33.92, -117.90, False), ("Mojave", 35.05, -118.17, False),
+])
+def test_county_outline_matches_known_places(name, lat, lon, expected):
+    geom = json.loads((BOUNDARIES / "la_county.geojson").read_text())["features"][0]["geometry"]
+    assert geom["type"] == "MultiPolygon"
+    assert _inside((lon, lat), geom["coordinates"]) is expected, name
+
+
+def test_boundaries_are_embedded_and_optional(demo, tmp_path):
+    from lacounty_tax.site import load_boundaries
+    b = load_boundaries(BOUNDARIES)
+    assert b["county"]["features"] and b["cities"] is None           # cities file not shipped (yet)
+    assert load_boundaries(tmp_path) == {"county": None, "cities": None}
+    assert load_boundaries(None) == {"county": None, "cities": None}
+    out = build_site([demo[1]], tmp_path / "site", BOUNDARIES)
+    blob = out.read_text().split('id="data">', 1)[1].split("</script>", 1)[0]
+    assert json.loads(blob)["boundaries"]["county"]["features"][0]["properties"]["fips"] == "06037"
+    out2 = build_site([demo[1]], tmp_path / "site2", None)           # no overlay: page still builds
+    assert json.loads(out2.read_text().split('id="data">', 1)[1].split("</script>", 1)[0])["boundaries"]["county"] is None

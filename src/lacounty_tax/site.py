@@ -51,19 +51,33 @@ def collect(data_dirs: list[Path]) -> list[dict]:
     return sorted(found, key=lambda a: (a["synthetic"], [-ord(c) for c in a["id"]]))
 
 
-def render_html(auctions: list[dict]) -> str:
+DEFAULT_BOUNDARIES_DIR = Path("data/reference/boundaries")
+
+
+def load_boundaries(boundaries_dir: Path | None) -> dict:
+    """GeoJSON overlays for the map: la_county.geojson, and la_cities.geojson if present."""
+    out: dict = {"county": None, "cities": None}
+    d = Path(boundaries_dir) if boundaries_dir else None
+    for key, name in (("county", "la_county.geojson"), ("cities", "la_cities.geojson")):
+        if d and (d / name).exists():
+            out[key] = json.loads((d / name).read_text())
+    return out
+
+
+def render_html(auctions: list[dict], boundaries: dict | None = None) -> str:
     tpl = resources.files("lacounty_tax").joinpath("templates")
     html = tpl.joinpath("dashboard.html").read_text()
     css = tpl.joinpath("dashboard.css").read_text()
     js = tpl.joinpath("dashboard.js").read_text()
-    data = json.dumps({"auctions": auctions}, separators=(",", ":"), allow_nan=False)
+    data = json.dumps({"auctions": auctions, "boundaries": boundaries or {"county": None, "cities": None}},
+                      separators=(",", ":"), allow_nan=False)
     # Escape every "<" (valid JSON): stops "</script>" and "<!--<script" from confusing the HTML parser.
     data = data.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     # data last, so user-visible text can never be re-expanded by a later replace
     return html.replace("/*CSS*/", css).replace("/*JS*/", js).replace("/*DATA*/", data)
 
 
-def build_site(data_dirs: list[Path], out_dir: Path) -> Path:
+def build_site(data_dirs: list[Path], out_dir: Path, boundaries_dir: Path | None = DEFAULT_BOUNDARIES_DIR) -> Path:
     auctions = collect(data_dirs)
     if not auctions:
         raise FileNotFoundError(
@@ -73,5 +87,5 @@ def build_site(data_dirs: list[Path], out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / ".nojekyll").write_text("")
     out = out_dir / "index.html"
-    out.write_text(render_html(auctions))
+    out.write_text(render_html(auctions, load_boundaries(boundaries_dir)))
     return out

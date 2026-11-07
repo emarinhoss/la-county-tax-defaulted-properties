@@ -400,6 +400,49 @@ if (typeof document !== "undefined") (function () {
 
   /* ---------- map ---------- */
   let map = null, markerLayer = null, tileLayer = null, tilesDark = null, lastFitKey = null;
+  let countyLayer = null, tilesOk = 0, tilesBad = 0, usedFallback = false;
+  const TILES = {
+    light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    fallback: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  };
+
+  function addTiles(url, attribution, subdomains) {
+    if (tileLayer) map.removeLayer(tileLayer);
+    tilesOk = tilesBad = 0;
+    $("mapWarn").hidden = true;
+    tileLayer = L.tileLayer(url, { subdomains: subdomains || "abc", maxZoom: 19, attribution }).addTo(map);
+    tileLayer.on("tileload", () => { tilesOk++; });
+    tileLayer.on("tileerror", () => {
+      tilesBad++;
+      if (tilesOk || tilesBad < 4) return;               // some tiles loaded, or too early to say
+      if (!usedFallback) {                               // first provider is failing: try plain OpenStreetMap
+        usedFallback = true;
+        addTiles(TILES.fallback, "© OpenStreetMap contributors");
+        return;
+      }
+      const w = $("mapWarn");
+      w.textContent = "The street basemap could not be loaded, so only the parcels and the county outline are shown. " +
+        (location.protocol === "file:"
+          ? "You opened this file straight from disk: tile servers refuse requests without a web address, so open the published site (or serve this folder, e.g. `python3 -m http.server`)."
+          : "Check your connection or whether a browser extension is blocking cartocdn.com and openstreetmap.org.");
+      w.hidden = false;
+    });
+  }
+
+  function addCounty() {
+    const county = DATA.boundaries && DATA.boundaries.county;
+    if (!county) return;
+    countyLayer = L.geoJSON(county, { interactive: false, style: countyStyle() }).addTo(map);
+    const b = countyLayer.getBounds();
+    map.setMaxBounds(b.pad(0.35));                       // limit panning to the county and its surroundings
+    map.setMinZoom(Math.max(7, map.getBoundsZoom(b.pad(0.35)) ));
+    map.fitBounds(b);
+    $("map").dataset.county = "1";
+    $("map").dataset.maxbounds = b.pad(0.35).toBBoxString();     // exposed for tests and debugging
+    $("map").dataset.minzoom = map.getMinZoom();
+  }
+  const countyStyle = () => ({ color: isDark() ? "#c3c2b7" : "#52514e", weight: 2, dashArray: "7 5", fill: false, opacity: 0.9 });
   const isDark = () => {
     const t = document.documentElement.dataset.theme;
     return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
@@ -428,16 +471,16 @@ if (typeof document !== "undefined") (function () {
     if (!map) {
       box.replaceChildren();
       map = L.map(box, { preferCanvas: true }).setView([34.05, -118.25], 9);
+      addCounty();                                        // beneath the markers
       markerLayer = L.layerGroup().addTo(map);
       box.addEventListener("keydown", (e) => { if (e.key === "Escape") map.closePopup(); });
     }
     map.invalidateSize();
     const dark = isDark();
     if (tilesDark !== dark) {
-      if (tileLayer) map.removeLayer(tileLayer);
-      tileLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
-        subdomains: "abcd", maxZoom: 19, attribution: "© OpenStreetMap contributors © CARTO",
-      }).addTo(map);
+      usedFallback ? addTiles(TILES.fallback, "© OpenStreetMap contributors")
+        : addTiles(dark ? TILES.dark : TILES.light, "© OpenStreetMap contributors © CARTO", "abcd");
+      if (countyLayer) countyLayer.setStyle(countyStyle());
       tilesDark = dark;
     }
     markerLayer.clearLayers();
@@ -491,6 +534,7 @@ if (typeof document !== "undefined") (function () {
         (unmapped ? `; ${fmtNum(unmapped)} matching parcel${unmapped === 1 ? " has" : "s have"} no coordinates (not found in the county GIS layer).` : ".");
     }
     const key = JSON.stringify([state.f, on, state.ai]);
+    if (key !== lastFitKey && !mapped.length && countyLayer) lastFitKey = key;       // nothing to frame: keep the county view
     if (key !== lastFitKey && mapped.length) {
       map.fitBounds(L.latLngBounds(mapped.map((r) => [r.lat, r.lon])).pad(0.1), { maxZoom: 15 });
       lastFitKey = key;

@@ -145,7 +145,8 @@ def _cmd_make_demo(args: argparse.Namespace) -> int:
 
 def _cmd_build_site(args: argparse.Namespace) -> int:
     try:
-        out = build_site([Path(d) for d in (args.data_dir or ["data/auctions"])], Path(args.out))
+        out = build_site([Path(d) for d in (args.data_dir or ["data/auctions"])], Path(args.out),
+                         Path(args.boundaries_dir))
     except FileNotFoundError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -243,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
     w = sub.add_parser("build-site", help="build the static dashboard (docs/index.html)")
     w.add_argument("--data-dir", action="append", help="folder of auctions; repeatable (default data/auctions)")
     w.add_argument("--out", default="docs")
+    w.add_argument("--boundaries-dir", default="data/reference/boundaries",
+                   help="folder with la_county.geojson (and optionally la_cities.geojson) for the map")
     w.set_defaults(func=_cmd_build_site)
 
     r = sub.add_parser("refresh", help="re-pull Assessor data for active auctions and re-score them (used by CI)")

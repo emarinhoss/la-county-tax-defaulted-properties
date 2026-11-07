@@ -144,6 +144,13 @@ are looked up once per parcel.
 - **Not yet run against the live service.** The default layer URL and the `AIN` field name are best known values. If the first run
   reports errors or matches nothing, pass `--gis-url` (a parcel layer's `.../query` URL) and `--ain-field`, or set
   `LACOUNTY_GIS_URL` / `LACOUNTY_GIS_AIN_FIELD`. Parcels the layer doesn't contain (some condo units, for example) stay unmapped.
+- **County outline and limits.** The map draws a dashed Los Angeles County outline (`data/reference/boundaries/la_county.geojson`,
+  from the Census Bureau's cartographic boundaries via the `us-atlas` package) and limits panning and zooming to the county and its
+  surroundings. The outline is heavily generalized (1:10,000,000): fine for orientation, not exact along the border. City boundaries
+  are not drawn yet; a `la_cities.geojson` in the same folder would be picked up automatically.
+- **Basemap trouble.** If street tiles cannot load, the map retries with plain OpenStreetMap and then shows a visible warning. Tile
+  servers refuse requests with no web address, so open the published site (or serve the folder with `python3 -m http.server`), not
+  `_site/index.html` straight from disk.
 - **Needs internet in the browser.** Leaflet 1.9.4 loads from unpkg with integrity hashes and street tiles from CARTO/OpenStreetMap.
   Offline, the Map tab shows a message and the rest of the page works.
 
