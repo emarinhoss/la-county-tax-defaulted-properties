@@ -30,6 +30,7 @@
       <button type="button" role="tab" data-seg="land" aria-selected="false">Land <span class="c"></span></button>
       <button type="button" role="tab" data-seg="excluded" aria-selected="false">Excluded <span class="c"></span></button>
       <button type="button" role="tab" data-seg="map" aria-selected="false">Map <span class="c"></span></button>
+      <button type="button" role="tab" data-seg="roll" aria-selected="false">Tax roll <span class="c"></span></button>
     </div>
     <div class="row" id="rentalOnly">
       <label class="fld">Expected winning bid, as a multiple of the minimum
@@ -46,6 +47,7 @@
       <label class="fld" id="typeWrap">Type<select id="type"></select></label>
       <label class="fld">Max minimum bid ($)<input type="number" id="maxBid" step="1000" style="width:120px" placeholder="any"></label>
       <label class="chk" style="align-self:end"><input type="checkbox" id="onlyDefaulted"> Only status DEFAULTED</label>
+      <label class="chk" style="align-self:end"><input type="checkbox" id="noPulled"> Hide likely-pulled (odds under 50%)</label>
       <button type="button" id="reset" style="align-self:end">Reset</button>
     </div>
   </section>
@@ -65,6 +67,29 @@
     <div class="maplegend" id="legend"></div>
     <div id="map" role="region" aria-label="Map of parcels"></div>
     <p class="mapnote" id="mapNote"></p>
+  </section>
+
+  <section class="card" id="rollCard" aria-label="Tax roll map" hidden>
+    <div class="maphead">
+      <h2>Tax roll: who is likely to stay in the sale</h2>
+      <div class="row">
+        <label class="fld" style="gap:0">Colour by
+          <select id="rollMode">
+            <option value="pull">Chance it is pulled before the sale</option>
+            <option value="years">Years in default</option>
+            <option value="paid">Share of the minimum bid already paid</option>
+            <option value="offered">Times offered in earlier books</option>
+          </select></label>
+        <label class="chk" id="rollReliefWrap" hidden><input type="checkbox" id="rollRelief" checked> Elevation</label>
+        <label class="chk"><input type="checkbox" id="rollStreets"> Streets <span class="muted" id="rollStreetsNote"></span></label>
+        <label class="chk" id="rollCitiesWrap" hidden><input type="checkbox" id="rollCities" checked> City boundaries</label>
+      </div>
+    </div>
+    <div class="facts" id="rollFacts"></div>
+    <div class="maplegend" id="rollLegend"></div>
+    <div id="rollMap" class="roll-map" role="region" aria-label="Map of parcels by tax roll status"></div>
+    <p class="mapnote" id="rollNote"></p>
+    <p class="mapnote">Source: the Treasurer-Tax Collector's secured defaulted tax roll and the county's earlier auction books. Click a parcel for its roll details.</p>
   </section>
 
   <section class="charts" id="chartsSec" aria-label="Charts">

@@ -14,7 +14,10 @@
     "rehab_per_sqft_mid": 30.0,
     "rehab_per_sqft_old": 45.0,
     "recent_transfer_years": 3.0,
-    "equity_ratio_flag": 10.0
+    "equity_ratio_flag": 10.0,
+    "paid_down_threshold": 0.5,
+    "paid_down_leave_prob": 0.75,
+    "rank_by": "adjusted"
   },
   "items": 360,
   "by_segment": {
@@ -33,6 +36,53 @@
   "ranked": 106,
   "median_cap_rate": 0.21044825185281021,
   "above_target": 95,
+  "roll": {
+    "snapshot": "2026-11-06.csv",
+    "rates": {
+      "all": {
+        "n": 353,
+        "redeemed": 18,
+        "rate": 0.05099150141643059
+      },
+      "0": {
+        "n": 18,
+        "redeemed": 0,
+        "rate": 0.0,
+        "pooled": false
+      },
+      "1-4": {
+        "n": 40,
+        "redeemed": 10,
+        "rate": 0.25,
+        "pooled": false
+      },
+      "5-9": {
+        "n": 69,
+        "redeemed": 6,
+        "rate": 0.08695652173913043,
+        "pooled": false
+      },
+      "10-19": {
+        "n": 128,
+        "redeemed": 2,
+        "rate": 0.015625,
+        "pooled": false
+      },
+      "20+": {
+        "n": 98,
+        "redeemed": 0,
+        "rate": 0.0,
+        "pooled": false
+      }
+    },
+    "on_roll": 353,
+    "redeemed": 25
+  },
+  "history_sales": [
+    "2024A",
+    "2025A",
+    "2025B"
+  ],
   "synthetic": true,
   "label": "Synthetic demo data: not real parcels, addresses or prices"
 }

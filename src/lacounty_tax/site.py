@@ -17,6 +17,9 @@ ROW_COLUMNS = [
     "land_value", "imp_value", "assessed_value", "bid_to_assessed", "bid_per_lot_sqft",
     "est_monthly_rent", "rehab_estimate", "rehab_risk", "redemption_risk", "fmr_metro_default",
     "excluded", "checklist", "lat", "lon",
+    "roll_status", "years_in_default", "redemption_amount_now", "paid_down_pct", "redemption_date", "roll_redeemed",
+    "unpaid_years", "oldest_unpaid_year", "sale_ref", "deeded_year", "p_stay", "adj_cap_rate", "rank_cap",
+    "offered_before", "offered_sales",
 ]
 
 

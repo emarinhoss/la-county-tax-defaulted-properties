@@ -15,6 +15,7 @@ import pandas as pd
 
 from .analyze import Assumptions, run_analysis
 from .enrich import SNAPSHOT_COLUMNS, update_status_history
+from .roll import SUMMARY_COLUMNS
 
 AUCTION_ID = "DEMO"
 # (lat_min, lat_max, lon_min, lon_max) of a few populated areas; demo points are placed at random inside them
@@ -124,7 +125,47 @@ def make_demo(out_dir: Path, fmr: pd.DataFrame, *, n_rental: int = 130, n_land: 
         df.to_csv(auction_dir / "enrichment" / f"{day.isoformat()}.csv", index=False)
         update_status_history(auction_dir / "status_history.csv", df)
 
+    _write_roll_and_history(auction_dir, items_df, final, rng, asof)
     run_analysis(auction_dir, fmr, Assumptions(), auction_dir / "enrichment" / f"{asof.isoformat()}.csv",
+                 history_path=auction_dir / "history.csv",
                  extra_summary={"synthetic": True,
                                 "label": "Synthetic demo data: not real parcels, addresses or prices"})
     return auction_dir
+
+
+def _write_roll_and_history(auction_dir: Path, items: pd.DataFrame, final: pd.DataFrame, rng, asof: date) -> None:
+    """Fake tax-roll snapshot and earlier-auction history that agree with the demo's tax statuses."""
+    status = dict(zip(final["ain"], final["tax_status"]))
+    rows = []
+    for r in items.itertuples():
+        st = status[r.ain]
+        rec = {c: None for c in SUMMARY_COLUMNS}
+        rec.update(ain=r.ain, on_roll=True, redeemed=False, default_count=1, compute_month="102026")
+        if st == "CURRENT":                                           # paid off: either off the roll or listed with a date
+            if rng.random() < 0.3:
+                rec.update(on_roll=False, redeemed=True)
+            else:
+                d = asof - timedelta(days=int(rng.integers(5, 90)))
+                dy = int(asof.year - rng.integers(1, 12))
+                rec.update(redeemed=True, redemption_date=d.isoformat(), defaulted_year=dy, years_in_default=asof.year - dy,
+                           redemption_amount=0.0, compute_month="000000", roll_status="defaulted")
+        else:
+            delinquent = st == "DELINQUENT"
+            years = 0 if delinquent else int(np.clip(rng.gamma(2.2, 7.5), 1, 45))
+            paid_down = delinquent or rng.random() < 0.03
+            amount = float(r.min_bid) * (float(rng.uniform(0.02, 0.4)) if paid_down else float(rng.uniform(0.97, 1.0)))
+            rec.update(roll_status="delinquent" if delinquent else "defaulted", default_count=int(rng.integers(2, 6)) if delinquent else 1,
+                       defaulted_year=asof.year - years, years_in_default=years, redemption_amount=round(amount, 2),
+                       unpaid_years=int(min(years, 6) + 1), oldest_unpaid_year=asof.year - max(years, 1))
+            if rng.random() < 0.15:
+                rec.update(sale_ref=f"2027A #{int(rng.integers(3300, 3700))}", deeded_year=int(asof.year - rng.integers(1, 12)))
+        rows.append(rec)
+    out = auction_dir / "roll"
+    out.mkdir(exist_ok=True)
+    pd.DataFrame(rows, columns=SUMMARY_COLUMNS).to_csv(out / f"{asof.isoformat()}.csv", index=False)
+    ains = list(items["ain"])
+    hist = []
+    for sale, share in (("2025B", 0.14), ("2025A", 0.10), ("2024A", 0.06)):
+        pick = rng.choice(len(ains), size=int(share * len(ains)), replace=False)
+        hist += [{"sale": sale, "ain": ains[i], "item": str(int(rng.integers(1, 1500))), "min_bid": float(items.iloc[i]["min_bid"]) * 1.1} for i in pick]
+    pd.DataFrame(hist).to_csv(auction_dir / "history.csv", index=False)

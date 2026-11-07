@@ -21,7 +21,24 @@ function capMetrics(a, rent, bid, rehab, m) {
   };
 }
 
-if (typeof module !== "undefined") module.exports = { capMetrics };
+/* cap rate x the chance the parcel actually reaches the sale (the ranking metric when rank_by is "adjusted") */
+function adjustedCap(cap, pStay) {
+  return cap == null ? null : cap * (pStay == null ? 1 : pStay);
+}
+
+/* how each colour mode of the Tax roll map sorts a live parcel into a class (null = no data for this mode) */
+const ROLL_MODES = {
+  pull: { title: "Chance it is pulled before the sale", idx: [0, 3, 5], labels: ["under 15%", "15–50%", "50% or more"],
+    of: (r) => { const x = 1 - r.p_stay; return x < 0.15 ? 0 : x < 0.5 ? 1 : 2; } },
+  years: { title: "Years in default", idx: [0, 2, 4, 5], labels: ["under 5", "5–9", "10–19", "20 or more"],
+    of: (r) => (r.years_in_default == null ? null : r.years_in_default < 5 ? 0 : r.years_in_default < 10 ? 1 : r.years_in_default < 20 ? 2 : 3) },
+  paid: { title: "Share of the minimum bid already paid off", idx: [0, 2, 4, 5], labels: ["under 5%", "5–50%", "50–95%", "95% or more"],
+    of: (r) => (r.paid_down_pct == null ? null : r.paid_down_pct < 0.05 ? 0 : r.paid_down_pct < 0.5 ? 1 : r.paid_down_pct < 0.95 ? 2 : 3) },
+  offered: { title: "Times offered in earlier books", idx: [0, 2, 4, 5], labels: ["never", "once", "twice", "3 or more"],
+    of: (r) => (r.offered_before == null ? null : Math.min(r.offered_before, 3)) },
+};
+
+if (typeof module !== "undefined") module.exports = { capMetrics, adjustedCap, ROLL_MODES };
 
 /* ---------- everything below needs a browser ---------- */
 if (typeof document !== "undefined") (function () {
@@ -32,6 +49,8 @@ if (typeof document !== "undefined") (function () {
   const fmtUsd = (v) => (v == null ? "n/a" : usd.format(v));
   const fmtNum = (v) => (v == null ? "n/a" : num.format(v));
   const fmtPct = (v, d = 1) => (v == null ? "n/a" : (v * 100).toFixed(d) + "%");
+  // odds are a screening estimate: never show them as a certainty
+  const fmtOdds = (v) => (v == null ? "n/a" : v > 0.99 ? ">99%" : fmtPct(v, 0));
   const fmtX = (v) => (v == null ? "n/a" : (v >= 10 ? v.toFixed(0) : v.toFixed(1)) + "×");
 
   const REASONS = {
@@ -56,8 +75,8 @@ if (typeof document !== "undefined") (function () {
 
   const state = {
     ai: 0, seg: "rental", m: 1, target: 0.08,
-    f: { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false },
-    sort: { rental: ["cap", -1], land: ["bidPerSqft", 1], excluded: ["min_bid", 1] },
+    f: { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false, noPulled: false },
+    sort: { rental: ["adjCap", -1], land: ["bidPerSqft", 1], excluded: ["min_bid", 1] },
     shown: 40, selected: null,
   };
   let auction, rows;
@@ -74,10 +93,12 @@ if (typeof document !== "undefined") (function () {
       d.maxBid = d.met ? d.met.maxBid : null;
       d.headroom = d.met ? d.met.headroom : null;
       d.bidPerSqft = r.bid_per_lot_sqft;
+      d.adjCap = adjustedCap(d.cap, r.p_stay);                                           // cap rate x odds the parcel stays in the sale
       d.rank = null;
       return d;
     });
-    rows.filter((r) => r.eligible).sort((x, y) => y.cap - x.cap).forEach((r, i) => (r.rank = i + 1));
+    const rankKey = a.rank_by === "cap" ? "cap" : "adjCap";
+    rows.filter((r) => r.eligible).sort((x, y) => y[rankKey] - x[rankKey]).forEach((r, i) => (r.rank = i + 1));
     return a;
   }
 
@@ -86,6 +107,7 @@ if (typeof document !== "undefined") (function () {
     land: (r) => r.segment === "land" && !r.excluded,
     excluded: (r) => !!r.excluded,
     map: () => true,
+    roll: () => true,
   };
 
   function passes(r) {
@@ -99,6 +121,7 @@ if (typeof document !== "undefined") (function () {
     }
     if (f.maxBid !== "" && r.min_bid > +f.maxBid) return false;
     if (f.onlyDefaulted && r.tax_status !== "DEFAULTED") return false;
+    if (f.noPulled && r.p_stay != null && r.p_stay < 0.5) return false;                 // likely to leave the sale before it happens
     if (r.segment === "rental" && !r.excluded) {
       if (f.minCap !== "" && (r.cap == null || r.cap < +f.minCap / 100)) return false;
       if (f.noHighRehab && r.rehab_risk === "high") return false;
@@ -288,9 +311,14 @@ if (typeof document !== "undefined") (function () {
       ["num_beds", "Bd/Ba · sqft · built", (r) => `${fmtNum(r.num_beds)}/${fmtNum(r.num_baths)} · ${fmtNum(r.sqft_main)} · ${r.year_built ?? "n/a"}`, "txt"],
       ["min_bid", "Min bid", (r) => fmtUsd(r.min_bid), "num"],
       ["est_monthly_rent", "Rent/mo", (r) => fmtUsd(r.est_monthly_rent), "num"],
-      ["cap", "Cap rate", (r) => fmtPct(r.cap), "num strong"],
+      ["cap", "Cap rate", (r) => fmtPct(r.cap), "num"],
+      ["p_stay", "Odds of sale", (r) => (fmtOdds(r.p_stay)), "num"],
+      ["adjCap", "Adj. cap", (r) => fmtPct(r.adjCap), "num strong"],
       ["maxBid", "Max bid", (r) => fmtUsd(r.maxBid), "num"],
       ["headroom", "Headroom", (r) => fmtX(r.headroom), "num"],
+      ["years_in_default", "Yrs in default", (r) => (r.years_in_default == null ? "n/a" : r.years_in_default), "num"],
+      ["paid_down_pct", "Paid down", (r) => (r.paid_down_pct == null ? "n/a" : fmtPct(r.paid_down_pct, 0)), "num"],
+      ["offered_before", "Offered before", (r) => (r.offered_before == null ? "n/a" : r.offered_before + "×"), "num"],
       ["rehab_risk", "Rehab", (r) => risk(r.rehab_risk), "txt"],
       ["redemption_risk", "Redemption", (r) => risk(r.redemption_risk), "txt"],
       ["tax_status", "Tax status", statusCell, "txt"],
@@ -304,6 +332,9 @@ if (typeof document !== "undefined") (function () {
       ["bidPerSqft", "$/lot sqft", (r) => (r.bidPerSqft == null ? "n/a" : "$" + r.bidPerSqft.toFixed(2)), "num strong"],
       ["assessed_value", "Assessed", (r) => fmtUsd(r.assessed_value), "num"],
       ["bid_to_assessed", "Bid ÷ assessed", (r) => fmtPct(r.bid_to_assessed, 0), "num"],
+      ["p_stay", "Odds of sale", (r) => (fmtOdds(r.p_stay)), "num"],
+      ["years_in_default", "Yrs in default", (r) => (r.years_in_default == null ? "n/a" : r.years_in_default), "num"],
+      ["offered_before", "Offered before", (r) => (r.offered_before == null ? "n/a" : r.offered_before + "×"), "num"],
       ["tax_status", "Tax status", statusCell, "txt"],
     ],
     excluded: [
@@ -329,7 +360,7 @@ if (typeof document !== "undefined") (function () {
     const head = h("tr", null, ...cols.map(([k, label, , cls]) =>
       h("th", { class: cls.split(" ")[0], "aria-sort": k === sk ? (sd > 0 ? "ascending" : "descending") : "none" },
         h("button", { type: "button", onclick: () => {
-          state.sort[state.seg] = [k, k === sk ? -sd : (k === "cap" || k === "headroom" || k === "maxBid" ? -1 : 1)];
+          state.sort[state.seg] = [k, k === sk ? -sd : (["cap", "adjCap", "p_stay", "headroom", "maxBid", "years_in_default", "paid_down_pct", "offered_before"].includes(k) ? -1 : 1)];
           render();
         } }, label, k === sk ? (sd > 0 ? " ▲" : " ▼") : ""))));
     const body = sorted.slice(0, state.shown).map((r) =>
@@ -344,6 +375,27 @@ if (typeof document !== "undefined") (function () {
     more.textContent = `Show more (${Math.min(40, sorted.length - state.shown)} of ${sorted.length - state.shown} remaining)`;
   }
 
+  /* ---------- tax roll section of the drawer ---------- */
+  function rollSection(r) {
+    if (r.p_stay == null) return [];
+    const kv = (k, v) => [h("dt", null, k), h("dd", null, v)];
+    const f = [];
+    if (r.p_stay === 0) {
+      f.push(...kv("Status", r.redemption_date ? "Redeemed " + r.redemption_date : "Redeemed or removed from the roll"));
+    } else {
+      f.push(...kv("Roll status", (r.roll_status || "n/a").toUpperCase()),
+        ...kv("In default since", r.years_in_default == null ? "n/a" : `${(auction.snapshot || "").slice(0, 4) - r.years_in_default || "?"} (${r.years_in_default} yrs)`),
+        ...kv("Owed today vs. minimum bid", r.redemption_amount_now == null ? "n/a" : `${fmtUsd(r.redemption_amount_now)} vs. ${fmtUsd(r.min_bid)}`),
+        ...kv("Already paid off", r.paid_down_pct == null ? "n/a" : fmtPct(r.paid_down_pct, 0)),
+        ...kv("Unpaid assessment years", r.unpaid_years == null ? "n/a" : `${fmtNum(r.unpaid_years)}${r.oldest_unpaid_year ? " (oldest " + r.oldest_unpaid_year + ")" : ""}`));
+    }
+    f.push(...kv("Offered in earlier books", r.offered_before == null ? "n/a" : r.offered_before ? `${r.offered_before}× (${r.offered_sales})` : "never"),
+      ...kv("Roll sale reference", r.sale_ref ? r.sale_ref + (r.deeded_year ? ` · deeded ${r.deeded_year}` : "") : "none"),
+      ...kv("Odds it reaches the sale", fmtOdds(r.p_stay)));
+    return [h("h3", null, "Tax roll"), h("dl", { class: "kv" }, ...f),
+      h("p", { class: "risks" }, h("small", null, "Odds combine the share of parcels like this one (same years in default) already redeemed on the roll with an assumed 75% chance that an account which has paid off half its balance is pulled. A screening estimate, not a forecast."))];
+  }
+
   /* ---------- detail drawer ---------- */
   function select(ain) {
     state.selected = ain;
@@ -353,6 +405,7 @@ if (typeof document !== "undefined") (function () {
     const a = Object.assign({}, auction.assumptions, { target_cap_rate: state.target });
     const kv = (k, v) => [h("dt", null, k), h("dd", null, v)];
     const money = [];
+    const rollInfo = rollSection(r);
     if (r.met) {
       const m = r.met, opex = m.egi * a.opex_pct, tax = a.property_tax_rate * m.paid;
       money.push(h("h3", null, "Return model"),
@@ -384,6 +437,7 @@ if (typeof document !== "undefined") (function () {
       r.excluded ? h("p", { class: "note" }, "Excluded: " + (REASONS[r.excluded] || r.excluded)) : null,
       r.tax_status && !["DEFAULTED", "CURRENT"].includes(r.tax_status) ? h("p", { class: "note" }, "⚑ Tax status " + r.tax_status + ". " + STATUS_NOTE) : null,
       ...money,
+      ...rollInfo,
       r.segment === "rental" ? h("p", { class: "risks" },
         h("span", null, "Rehab risk: ", risk(r.rehab_risk)), " ", h("small", null, RISK_NOTE.rehab), h("br"),
         h("span", null, "Redemption risk: ", risk(r.redemption_risk)), " ", h("small", null, RISK_NOTE.redemption)) : null,
@@ -398,100 +452,12 @@ if (typeof document !== "undefined") (function () {
     render();
   }
 
-  /* ---------- map ---------- */
-  let map = null, markerLayer = null, tileLayer = null, tilesDark = null, lastFitKey = null;
-  let countyLayer = null, landLayer = null, reliefLayer = null, citiesLayer = null;
-  let tilesOk = 0, tilesBad = 0, usedFallback = false, tilesDead = false;
+  /* ---------- map views: the cap-rate map (Map tab) and the tax-roll map (Tax roll tab) ---------- */
   const TILES = {
     light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
     dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
     fallback: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
   };
-
-  // Optional street tiles (off by default). If they cannot load we quietly go back to the built-in background.
-  function addTiles(url, attribution, subdomains) {
-    if (tileLayer) map.removeLayer(tileLayer);
-    tilesOk = tilesBad = 0;
-    tileLayer = L.tileLayer(url, { subdomains: subdomains || "abc", maxZoom: 19, attribution }).addTo(map);
-    tileLayer.on("tileload", () => { tilesOk++; });
-    tileLayer.on("tileerror", () => {
-      tilesBad++;
-      if (tilesOk || tilesBad < 4) return;               // some tiles loaded, or too early to say
-      if (!usedFallback) {                               // first provider is failing: try plain OpenStreetMap
-        usedFallback = true;
-        addTiles(TILES.fallback, "© OpenStreetMap contributors");
-        return;
-      }
-      tilesDead = true;                                  // give up silently: the land colour and relief are the background
-      $("lyStreets").checked = false;
-      $("streetsNote").textContent = "(unavailable)";
-      applyBase();
-    });
-  }
-
-  function addCities() {
-    const cities = DATA.boundaries && DATA.boundaries.cities;
-    if (!cities) return;
-    citiesLayer = L.geoJSON(cities, { interactive: false, style: cityStyle() });
-    $("lyCitiesWrap").hidden = false;
-    $("map").dataset.cities = String(cities.features.length);
-  }
-  const cityStyle = () => (f) => ({
-    color: isDark() ? "#a09f95" : "#6f6e69", fill: false,
-    ...(f && f.properties && f.properties.kind === "unincorporated" ? { weight: 1, opacity: 0.5, dashArray: "2 4" } : { weight: 1, opacity: 0.8 }),
-  });
-
-  // Background = a solid land colour (the county shape) with an optional elevation-shading image on top of it.
-  // Separate panes keep the order: land colour (250) < relief image (300) < outlines, city lines and parcels (400+).
-  const landStyle = () => ({ stroke: false, fill: true, fillColor: isDark() ? "#2b2b29" : "#fbfbf9", fillOpacity: 1 });
-  const countyOutline = () => ({ color: isDark() ? "#c3c2b7" : "#52514e", weight: 2, dashArray: "7 5", opacity: 0.9, fill: false });
-  function addCounty() {
-    const county = DATA.boundaries && DATA.boundaries.county;
-    if (!county) return;
-    for (const [name, z] of [["land", 250], ["relief", 300]]) {
-      const pane = map.createPane(name);
-      pane.style.zIndex = z;
-      pane.style.pointerEvents = "none";
-    }
-    landLayer = L.geoJSON(county, { pane: "land", renderer: L.svg({ pane: "land" }), interactive: false, style: landStyle() });
-    countyLayer = L.geoJSON(county, { interactive: false, style: countyOutline() }).addTo(map);
-    const R = DATA.relief;
-    if (R) {
-      reliefLayer = L.imageOverlay(R.url, R.bounds, { pane: "relief", interactive: false, attribution: R.attribution });
-      $("lyReliefWrap").hidden = false;
-    }
-    const b = countyLayer.getBounds();
-    map.setMaxBounds(b.pad(0.35));                       // limit panning to the county and its surroundings
-    map.setMinZoom(Math.max(7, map.getBoundsZoom(b.pad(0.35))));
-    map.fitBounds(b);
-    $("map").dataset.county = "1";
-    $("map").dataset.maxbounds = b.pad(0.35).toBBoxString();     // exposed for tests and debugging
-    $("map").dataset.minzoom = map.getMinZoom();
-  }
-  const streetsOn = () => $("lyStreets").checked && !tilesDead;
-  const toggleLayer = (layer, on) => {
-    if (!layer) return;
-    if (on && !map.hasLayer(layer)) layer.addTo(map);
-    if (!on && map.hasLayer(layer)) map.removeLayer(layer);
-  };
-
-  function applyBase() {
-    const streets = streetsOn();
-    if (streets) {
-      if (!tileLayer) usedFallback ? addTiles(TILES.fallback, "© OpenStreetMap contributors")
-        : addTiles(isDark() ? TILES.dark : TILES.light, "© OpenStreetMap contributors © CARTO", "abcd");
-    } else if (tileLayer) {
-      map.removeLayer(tileLayer);
-      tileLayer = null;
-    }
-    const relief = !streets && !!reliefLayer && $("lyRelief").checked;
-    toggleLayer(landLayer, !streets);                    // street tiles already draw the land, so no colour under them
-    toggleLayer(reliefLayer, relief);
-    if (reliefLayer) reliefLayer.setOpacity(isDark() ? 0.8 : 1);
-    if (landLayer) landLayer.setStyle(landStyle());
-    if (countyLayer) countyLayer.setStyle(countyOutline());
-    $("map").dataset.base = streets ? "streets" : relief ? "relief" : "solid";       // for tests and debugging
-  }
   const isDark = () => {
     const t = document.documentElement.dataset.theme;
     return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
@@ -510,65 +476,182 @@ if (typeof document !== "undefined") (function () {
   }
   const classOf = (cap, c) => c.breaks.filter((b) => cap >= b).length;
 
-  function renderMap(list) {
-    const box = $("map"), note = $("mapNote"), legend = $("legend");
-    if (typeof L === "undefined") {
-      box.replaceChildren(h("p", { class: "empty" }, "The map library could not load (are you offline?). The other tabs still work."));
-      legend.replaceChildren(); note.textContent = "";
-      return;
-    }
-    if (!map) {
-      box.replaceChildren();
-      map = L.map(box, { preferCanvas: true }).setView([34.05, -118.25], 9);
-      addCounty();                                        // county shape first (it can be filled), then city lines, then markers
-      addCities();
-      if (citiesLayer && $("lyCities").checked) citiesLayer.addTo(map);
-      markerLayer = L.layerGroup().addTo(map);
-      box.addEventListener("keydown", (e) => { if (e.key === "Escape") map.closePopup(); });
-    }
-    map.invalidateSize();
-    const dark = isDark();
-    if (tilesDark !== dark) {                            // theme changed: new tiles (and shape colors)
-      if (tileLayer) { map.removeLayer(tileLayer); tileLayer = null; }
-      tilesDark = dark;
-      if (citiesLayer) citiesLayer.setStyle(cityStyle());
-    }
-    applyBase();
-    markerLayer.clearLayers();
-    if (citiesLayer) {
-      const want = $("lyCities").checked;
-      if (want && !map.hasLayer(citiesLayer)) citiesLayer.addTo(map);
-      if (!want && map.hasLayer(citiesLayer)) map.removeLayer(citiesLayer);
+  const cityStyle = () => (f) => ({
+    color: isDark() ? "#a09f95" : "#6f6e69", fill: false,
+    ...(f && f.properties && f.properties.kind === "unincorporated" ? { weight: 1, opacity: 0.5, dashArray: "2 4" } : { weight: 1, opacity: 0.8 }),
+  });
+  // Background = a solid land colour (the county shape) with an optional elevation-shading image on top of it.
+  // Separate panes keep the order: land colour (250) < relief image (300) < outlines, city lines and parcels (400+).
+  const landStyle = () => ({ stroke: false, fill: true, fillColor: isDark() ? "#2b2b29" : "#fbfbf9", fillOpacity: 1 });
+  const countyOutline = () => ({ color: isDark() ? "#c3c2b7" : "#52514e", weight: 2, dashArray: "7 5", opacity: 0.9, fill: false });
+
+  // One independent Leaflet map per tab: same background, own markers/legend. cfg = { ids, draw, onChange }.
+  function createMapView(cfg) {
+    const el = (k) => $(cfg.ids[k]);
+    let map = null, markerLayer = null, tileLayer = null, tilesDark = null, lastFitKey = null;
+    let countyLayer = null, landLayer = null, reliefLayer = null, citiesLayer = null;
+    let tilesOk = 0, tilesBad = 0, usedFallback = false, tilesDead = false;
+    const streetsOn = () => el("streets").checked && !tilesDead;
+    const toggleLayer = (layer, on) => {
+      if (!layer) return;
+      if (on && !map.hasLayer(layer)) layer.addTo(map);
+      if (!on && map.hasLayer(layer)) map.removeLayer(layer);
+    };
+
+    // Optional street tiles (off by default). If they cannot load we quietly go back to the built-in background.
+    function addTiles(url, attribution, subdomains) {
+      if (tileLayer) map.removeLayer(tileLayer);
+      tilesOk = tilesBad = 0;
+      tileLayer = L.tileLayer(url, { subdomains: subdomains || "abc", maxZoom: 19, attribution }).addTo(map);
+      tileLayer.on("tileload", () => { tilesOk++; });
+      tileLayer.on("tileerror", () => {
+        tilesBad++;
+        if (tilesOk || tilesBad < 4) return;             // some tiles loaded, or too early to say
+        if (!usedFallback) {                             // first provider is failing: try plain OpenStreetMap
+          usedFallback = true;
+          addTiles(TILES.fallback, "© OpenStreetMap contributors");
+          return;
+        }
+        tilesDead = true;                                // give up silently: the land colour and relief are the background
+        el("streets").checked = false;
+        el("streetsNote").textContent = "(unavailable)";
+        applyBase();
+      });
     }
 
+    function addCities() {
+      const cities = DATA.boundaries && DATA.boundaries.cities;
+      if (!cities) return;
+      citiesLayer = L.geoJSON(cities, { interactive: false, style: cityStyle() });
+      el("citiesWrap").hidden = false;
+      el("box").dataset.cities = String(cities.features.length);
+    }
+
+    function addCounty() {
+      const county = DATA.boundaries && DATA.boundaries.county;
+      if (!county) return;
+      for (const [name, z] of [["land", 250], ["relief", 300]]) {
+        const pane = map.createPane(name);
+        pane.style.zIndex = z;
+        pane.style.pointerEvents = "none";
+      }
+      landLayer = L.geoJSON(county, { pane: "land", renderer: L.svg({ pane: "land" }), interactive: false, style: landStyle() });
+      countyLayer = L.geoJSON(county, { interactive: false, style: countyOutline() }).addTo(map);
+      const R = DATA.relief;
+      if (R) {
+        reliefLayer = L.imageOverlay(R.url, R.bounds, { pane: "relief", interactive: false, attribution: R.attribution });
+        el("reliefWrap").hidden = false;
+      }
+      const b = countyLayer.getBounds();
+      map.setMaxBounds(b.pad(0.35));                     // limit panning to the county and its surroundings
+      map.setMinZoom(Math.max(7, map.getBoundsZoom(b.pad(0.35))));
+      map.fitBounds(b);
+      el("box").dataset.county = "1";
+      el("box").dataset.maxbounds = b.pad(0.35).toBBoxString();     // exposed for tests and debugging
+      el("box").dataset.minzoom = map.getMinZoom();
+    }
+
+    function applyBase() {
+      const streets = streetsOn();
+      if (streets) {
+        if (!tileLayer) usedFallback ? addTiles(TILES.fallback, "© OpenStreetMap contributors")
+          : addTiles(isDark() ? TILES.dark : TILES.light, "© OpenStreetMap contributors © CARTO", "abcd");
+      } else if (tileLayer) {
+        map.removeLayer(tileLayer);
+        tileLayer = null;
+      }
+      const relief = !streets && !!reliefLayer && el("relief").checked;
+      toggleLayer(landLayer, !streets);                  // street tiles already draw the land, so no colour under them
+      toggleLayer(reliefLayer, relief);
+      if (reliefLayer) reliefLayer.setOpacity(isDark() ? 0.8 : 1);
+      if (landLayer) landLayer.setStyle(landStyle());
+      if (countyLayer) countyLayer.setStyle(countyOutline());
+      el("box").dataset.base = streets ? "streets" : relief ? "relief" : "solid";       // for tests and debugging
+    }
+
+    el("streets").addEventListener("change", (e) => {
+      if (e.target.checked) { tilesDead = false; usedFallback = false; el("streetsNote").textContent = ""; }
+    });
+    ["streets", "relief", "cities"].forEach((k) => el(k).addEventListener("change", cfg.onChange));
+
+    function render(list) {
+      const box = el("box"), note = el("note"), legend = el("legend");
+      if (typeof L === "undefined") {
+        box.replaceChildren(h("p", { class: "empty" }, "The map library could not load. The other tabs still work."));
+        legend.replaceChildren(); note.textContent = "";
+        return;
+      }
+      if (!map) {
+        box.replaceChildren();
+        map = L.map(box, { preferCanvas: true }).setView([34.05, -118.25], 9);
+        addCounty();                                      // county shape first (it can be filled), then city lines, then markers
+        addCities();
+        if (citiesLayer && el("cities").checked) citiesLayer.addTo(map);
+        markerLayer = L.layerGroup().addTo(map);
+        box.addEventListener("keydown", (e) => { if (e.key === "Escape") map.closePopup(); });
+      }
+      map.invalidateSize();
+      const dark = isDark();
+      if (tilesDark !== dark) {                          // theme changed: new tiles (and shape colors)
+        if (tileLayer) { map.removeLayer(tileLayer); tileLayer = null; }
+        tilesDark = dark;
+        if (citiesLayer) citiesLayer.setStyle(cityStyle());
+      }
+      applyBase();
+      markerLayer.clearLayers();
+      if (citiesLayer) toggleLayer(citiesLayer, el("cities").checked);
+
+      const d = cfg.draw(list, { dark, ramp: dark ? RAMP_DARK : RAMP_LIGHT, grey: dark ? "#a09f95" : "#6f6e69", ringColor: dark ? "#1a1a19" : "#fcfcfb",
+                                  strong: dark ? "#f0efec" : "#0b0b0b" });
+      d.points.forEach(({ r, style, tip }) => {
+        const m = L.circleMarker([r.lat, r.lon], style).addTo(markerLayer);
+        m.bindTooltip(tip, { sticky: true });
+        m.on("click", () => select(r.ain));
+      });
+      legend.replaceChildren(...d.legend);
+      const unmapped = d.shown.length - d.points.length;
+      box.dataset.markers = d.points.length;
+      if (!rows.some((r) => r.lat != null)) {
+        note.textContent = "No coordinates yet. Run `lacounty-tax geocode " + auction.id + "` (the weekly refresh also does this) and rebuild.";
+      } else {
+        note.textContent = `${fmtNum(d.points.length)} parcel${d.points.length === 1 ? "" : "s"} on the map` +
+          (unmapped ? `; ${fmtNum(unmapped)} matching parcel${unmapped === 1 ? " has" : "s have"} no coordinates (not found in the county GIS layer).` : ".");
+      }
+      if (d.fitKey !== lastFitKey && !d.points.length && countyLayer) lastFitKey = d.fitKey;       // nothing to frame: keep the county view
+      if (d.fitKey !== lastFitKey && d.points.length) {
+        map.fitBounds(L.latLngBounds(d.points.map(({ r }) => [r.lat, r.lon])).pad(0.1), { maxZoom: 15 });
+        lastFitKey = d.fitKey;
+      }
+    }
+    return { render };
+  }
+
+  const swatch = (c, size = 14, ring = false) => h("span", { class: "sw",
+    style: ring ? `background:transparent;border:2px solid ${c};width:${size}px;height:${size}px` : `background:${c};width:${size}px;height:${size}px` });
+
+  // --- Map tab: rentals coloured by cap-rate class, land and excluded parcels as small grey dots
+  function drawCap(list, ctx) {
     const on = { rental: $("lyRental").checked, land: $("lyLand").checked, excluded: $("lyExcl").checked };
     const shown = list.filter((r) => on[kindOf(r)]);
     const mapped = shown.filter((r) => r.lat != null && r.lon != null);
-    const ramp = dark ? RAMP_DARK : RAMP_LIGHT;
+    const { ramp, grey, ringColor, strong } = ctx;
     const rentals = mapped.filter((r) => kindOf(r) === "rental" && r.cap != null);
     const cls = capClasses(rentals.map((r) => r.cap));
     const color = (r) => ramp[Math.min(ramp.length - 1, Math.round((classOf(r.cap, cls) * (ramp.length - 1)) / Math.max(1, cls.n - 1)))];
-    const grey = dark ? "#a09f95" : "#6f6e69";
-    const ringColor = dark ? "#1a1a19" : "#fcfcfb";
-
     const order = { excluded: 0, land: 1, rental: 2 };            // rentals drawn last, on top
-    mapped.sort((a, b) => order[kindOf(a)] - order[kindOf(b)]).forEach((r) => {
+    const points = mapped.sort((a, b) => order[kindOf(a)] - order[kindOf(b)]).map((r) => {
       const k = kindOf(r), sel = state.selected === r.ain;
       const style = k === "rental" && r.cap != null
-        ? { radius: sel ? 10 : 7, fillColor: color(r), fillOpacity: 0.92, color: sel ? (dark ? "#f0efec" : "#0b0b0b") : ringColor, weight: sel ? 3 : 1.5 }
+        ? { radius: sel ? 10 : 7, fillColor: color(r), fillOpacity: 0.92, color: sel ? strong : ringColor, weight: sel ? 3 : 1.5 }
         : k === "land" ? { radius: sel ? 8 : 4, fillColor: grey, fillOpacity: 0.55, color: sel ? ringColor : grey, weight: sel ? 2 : 0 }
         : { radius: sel ? 8 : 3, fillColor: grey, fillOpacity: 0.3, color: sel ? ringColor : grey, weight: sel ? 2 : 0 };
-      const m = L.circleMarker([r.lat, r.lon], style).addTo(markerLayer);
-      m.bindTooltip(() => h("div", null,
+      const tip = () => h("div", null,
         h("strong", null, addr(r)),
-        h("div", null, k === "rental" && r.cap != null ? `Min bid ${fmtUsd(r.min_bid)} · cap rate ${fmtPct(r.cap)} (#${r.rank})`
+        h("div", null, k === "rental" && r.cap != null ? `Min bid ${fmtUsd(r.min_bid)} · cap rate ${fmtPct(r.cap)} · odds of sale ${fmtOdds(r.p_stay)} (#${r.rank})`
           : `Min bid ${fmtUsd(r.min_bid)} · ${k === "excluded" ? REASONS[r.excluded] || "excluded" : "land"}`),
-        r.tax_status && r.tax_status !== "DEFAULTED" ? h("div", null, "⚑ " + r.tax_status) : null), { sticky: true });
-      m.on("click", () => select(r.ain));
+        r.tax_status && r.tax_status !== "DEFAULTED" ? h("div", null, "⚑ " + r.tax_status) : null);
+      return { r, style, tip };
     });
-
-    // legend: rentals by cap-rate class, plus the dot kinds
-    const swatch = (c, size = 14) => h("span", { class: "sw", style: `background:${c};width:${size}px;height:${size}px` });
     const items = [];
     if (rentals.length) {
       items.push(h("strong", null, `Rental cap rate at ${fmtX(state.m)} the minimum bid:`));
@@ -579,23 +662,76 @@ if (typeof document !== "undefined") (function () {
       }
     }
     items.push(h("span", null, swatch(grey, 9), "land"), h("span", null, swatch(grey, 6), "excluded"));
-    legend.replaceChildren(...items);
-
-    const unmapped = shown.length - mapped.length;
-    box.dataset.markers = mapped.length;
-    if (!rows.some((r) => r.lat != null)) {
-      note.textContent = "No coordinates yet. Run `lacounty-tax geocode " + auction.id + "` (the weekly refresh also does this) and rebuild.";
-    } else {
-      note.textContent = `${fmtNum(mapped.length)} parcel${mapped.length === 1 ? "" : "s"} on the map` +
-        (unmapped ? `; ${fmtNum(unmapped)} matching parcel${unmapped === 1 ? " has" : "s have"} no coordinates (not found in the county GIS layer).` : ".");
-    }
-    const key = JSON.stringify([state.f, on, state.ai]);
-    if (key !== lastFitKey && !mapped.length && countyLayer) lastFitKey = key;       // nothing to frame: keep the county view
-    if (key !== lastFitKey && mapped.length) {
-      map.fitBounds(L.latLngBounds(mapped.map((r) => [r.lat, r.lon])).pad(0.1), { maxZoom: 15 });
-      lastFitKey = key;
-    }
+    return { shown, points, legend: items, fitKey: JSON.stringify([state.f, on, state.ai]) };
   }
+
+  // --- Tax roll tab: every parcel, coloured by one of the roll's signals
+  function drawRoll(list, ctx) {
+    const mode = ROLL_MODES[$("rollMode").value] || ROLL_MODES.pull;
+    const mapped = list.filter((r) => r.lat != null && r.lon != null);
+    const { ramp, grey, ringColor, strong } = ctx;
+    const counts = mode.labels.map(() => 0);
+    let gone = 0, nodata = 0;
+    const tip = (r) => () => h("div", null,
+      h("strong", null, addr(r)),
+      h("div", null, `Min bid ${fmtUsd(r.min_bid)}` + (r.p_stay == null ? "" : ` · odds of sale ${fmtOdds(r.p_stay)}`)),
+      r.p_stay == null ? h("div", null, "No tax-roll data")
+        : r.p_stay === 0 ? h("div", null, r.redemption_date ? "Redeemed " + r.redemption_date : "Redeemed or removed from the roll")
+        : h("div", null, `${r.years_in_default ?? "?"} yrs in default · ${r.paid_down_pct == null ? "?" : fmtPct(r.paid_down_pct, 0)} of the bid paid · offered ${r.offered_before ?? 0}× before`),
+      r.roll_status === "delinquent" ? h("div", null, "⚑ DELINQUENT") : null);
+    const points = mapped.map((r) => {
+      const sel = state.selected === r.ain;
+      let style, layer = 1;
+      const c = r.p_stay != null && r.p_stay > 0 ? mode.of(r) : null;
+      if (r.p_stay === 0) {                                                  // redeemed or off the roll: a hollow ring
+        gone++; layer = 0;
+        style = { radius: sel ? 8 : 4, fillColor: "transparent", fillOpacity: 0, color: sel ? strong : grey, weight: sel ? 3 : 1.5, opacity: 0.85 };
+      } else if (c == null) {                                                // no roll data for this parcel
+        nodata++; layer = 0;
+        style = { radius: sel ? 8 : 3, fillColor: grey, fillOpacity: 0.25, color: sel ? ringColor : grey, weight: sel ? 2 : 0 };
+      } else {
+        counts[c]++; layer = 2;
+        style = { radius: sel ? 10 : 6, fillColor: ramp[mode.idx[c]], fillOpacity: 0.92, color: sel ? strong : ringColor, weight: sel ? 3 : 1.5 };
+      }
+      return { r, style, tip: tip(r), layer };
+    }).sort((a, b) => a.layer - b.layer);
+    const items = [h("strong", null, mode.title + ":")];
+    mode.labels.forEach((lab, i) => items.push(h("span", null, swatch(ramp[mode.idx[i]]), `${lab} (${fmtNum(counts[i])})`)));
+    if (gone) items.push(h("span", null, swatch(grey, 11, true), `redeemed or off the roll (${fmtNum(gone)})`));
+    if (nodata) items.push(h("span", null, swatch(grey, 9), `no roll data (${fmtNum(nodata)})`));
+    return { shown: list, points, legend: items, fitKey: JSON.stringify([state.f, state.ai]) };
+  }
+
+  function renderRollFacts() {
+    const box = $("rollFacts");
+    const withRoll = rows.filter((r) => r.p_stay != null);
+    if (!withRoll.length) {
+      box.replaceChildren(h("p", { class: "note" }, "No tax-roll data yet. Run `lacounty-tax pull-roll " + auction.id + "` (the weekly refresh does this too) and rebuild."));
+      return;
+    }
+    const live = withRoll.filter((r) => r.p_stay > 0), yrs = live.map((r) => r.years_in_default).filter((v) => v != null).sort((x, y) => x - y);
+    const med = yrs.length ? (yrs[(yrs.length - 1) >> 1] + yrs[yrs.length >> 1]) / 2 : null;
+    const facts = [
+      [fmtNum(live.length), "live accounts"],
+      [fmtNum(withRoll.length - live.length), "redeemed or removed"],
+      [med == null ? "n/a" : med + " yrs", "median time in default"],
+      [fmtNum(live.filter((r) => r.paid_down_pct != null && r.paid_down_pct >= 0.5).length), "paid down 50%+"],
+      [fmtNum(live.filter((r) => r.roll_status === "delinquent").length), "delinquent"],
+      [fmtNum(rows.filter((r) => r.offered_before > 0).length), "offered before"],
+    ];
+    box.replaceChildren(...facts.map(([v, k]) => h("div", { class: "fact" }, h("strong", null, v), h("span", null, k))));
+  }
+
+  const capView = createMapView({
+    ids: { box: "map", note: "mapNote", legend: "legend", streets: "lyStreets", streetsNote: "streetsNote", relief: "lyRelief", reliefWrap: "lyReliefWrap",
+           cities: "lyCities", citiesWrap: "lyCitiesWrap" },
+    draw: drawCap, onChange: () => render(),
+  });
+  const rollView = createMapView({
+    ids: { box: "rollMap", note: "rollNote", legend: "rollLegend", streets: "rollStreets", streetsNote: "rollStreetsNote", relief: "rollRelief",
+           reliefWrap: "rollReliefWrap", cities: "rollCities", citiesWrap: "rollCitiesWrap" },
+    draw: drawRoll, onChange: () => render(),
+  });
 
   /* ---------- page ---------- */
   function renderKpis(a) {
@@ -605,9 +741,10 @@ if (typeof document !== "undefined") (function () {
     const above = elig.filter((r) => r.cap >= state.target).length;
     const excl = rows.filter((r) => r.excluded).length;
     const flagged = elig.filter((r) => r.tax_status !== "DEFAULTED").length;
+    const pulled = elig.filter((r) => r.p_stay != null && r.p_stay < 0.5).length;
     const tiles = [
       ["Parcels in auction", fmtNum(rows.length), `${rows.filter((r) => r.segment === "rental").length} improved · ${rows.filter((r) => r.segment === "land").length} land`],
-      ["Rentals ranked", fmtNum(elig.length), "improved, rentable, still on the list" + (flagged ? ` · ${flagged} not DEFAULTED ⚑` : "")],
+      ["Rentals ranked", fmtNum(elig.length), "ranked by cap rate × odds of sale" + (pulled ? ` · ${pulled} likely pulled` : "") + (flagged ? ` · ${flagged} not DEFAULTED ⚑` : "")],
       [`At or above ${fmtPct(state.target, 1)} cap`, fmtNum(above), `when paying ${fmtX(state.m)} the minimum bid`],
       ["Median cap rate", fmtPct(med), "ranked rentals"],
       ["Excluded", fmtNum(excl), "taxes paid, no data, out of scope"],
@@ -655,7 +792,7 @@ if (typeof document !== "undefined") (function () {
 
   function renderControls() {
     const segCounts = { rental: rows.filter(inSeg.rental).length, land: rows.filter(inSeg.land).length, excluded: rows.filter(inSeg.excluded).length,
-      map: rows.filter((r) => r.lat != null).length };
+      map: rows.filter((r) => r.lat != null).length, roll: rows.filter((r) => r.p_stay != null && r.p_stay > 0).length };
     document.querySelectorAll("[data-seg]").forEach((b) => {
       const s = b.dataset.seg;
       b.setAttribute("aria-selected", s === state.seg);
@@ -671,12 +808,16 @@ if (typeof document !== "undefined") (function () {
     const list = rows.filter(inSeg[state.seg]).filter(passes);
     renderControls();
     renderKpis(a);
-    const isMap = state.seg === "map";
+    const isMap = state.seg === "map", isRoll = state.seg === "roll";
     $("mapCard").hidden = !isMap;
-    $("chartsSec").hidden = isMap;
-    $("tableSec").hidden = isMap;
-    if (isMap) renderMap(list);
-    else {
+    $("rollCard").hidden = !isRoll;
+    $("chartsSec").hidden = isMap || isRoll;
+    $("tableSec").hidden = isMap || isRoll;
+    if (isMap) capView.render(list);
+    else if (isRoll) {
+      renderRollFacts();
+      rollView.render(list);
+    } else {
       renderCharts(list);
       renderTable(list);
     }
@@ -716,14 +857,12 @@ if (typeof document !== "undefined") (function () {
   bind("noHighRedemption", "noHighRedemption", "change", (e) => e.target.checked);
   bind("noFallback", "noFallback", "change", (e) => e.target.checked);
   bind("onlyDefaulted", "onlyDefaulted", "change", (e) => e.target.checked);
-  $("lyStreets").addEventListener("change", (e) => {
-    if (e.target.checked) { tilesDead = false; usedFallback = false; $("streetsNote").textContent = ""; }
-  });
-  ["lyRental", "lyLand", "lyExcl", "lyCities", "lyStreets", "lyRelief"].forEach((id) => $(id).addEventListener("change", render));
+  bind("noPulled", "noPulled", "change", (e) => e.target.checked);
+  ["lyRental", "lyLand", "lyExcl", "rollMode"].forEach((id) => $(id).addEventListener("change", render));
   $("reset").addEventListener("click", () => {
-    Object.assign(state.f, { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false });
+    Object.assign(state.f, { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false, noPulled: false });
     $("loc").value = $("type").value = $("q").value = $("minCap").value = $("maxBid").value = "";
-    ["noHighRehab", "noHighRedemption", "noFallback", "onlyDefaulted"].forEach((id) => ($(id).checked = false));
+    ["noHighRehab", "noHighRedemption", "noFallback", "onlyDefaulted", "noPulled"].forEach((id) => ($(id).checked = false));
     state.m = auction.assumptions.bid_multiple; state.target = auction.assumptions.target_cap_rate;
     $("m").value = state.m; $("target").value = (state.target * 100).toFixed(1);
     render();
@@ -740,7 +879,7 @@ if (typeof document !== "undefined") (function () {
   $("theme").addEventListener("click", () => {
     const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     setTheme(dark ? "light" : "dark");
-    if (state.seg === "map") render();
+    if (state.seg === "map" || state.seg === "roll") render();
   });
 
   boot();

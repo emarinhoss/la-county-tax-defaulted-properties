@@ -157,3 +157,53 @@ def test_boundaries_are_embedded_and_optional(demo, tmp_path):
     assert json.loads(blob)["boundaries"]["county"]["features"][0]["properties"]["fips"] == "06037"
     out2 = build_site([demo[1]], tmp_path / "site2", None)           # no overlay: page still builds
     assert json.loads(out2.read_text().split('id="data">', 1)[1].split("</script>", 1)[0])["boundaries"]["county"] is None
+
+
+# ---------------------------------------------------------------- Tax roll tab: data, page and JS logic
+def test_rows_carry_the_roll_and_history_fields(demo):
+    rows = collect([demo[1]])[0]["rows"]
+    for col in ("p_stay", "years_in_default", "paid_down_pct", "offered_before", "offered_sales", "roll_status", "redemption_date",
+                "sale_ref", "rank_cap", "adj_cap_rate", "redemption_amount_now"):
+        assert col in ROW_COLUMNS and col in rows[0]
+    live = [r for r in rows if r["p_stay"]]
+    assert live and any(r["paid_down_pct"] and r["paid_down_pct"] > 0.5 for r in live)
+    assert any(r["p_stay"] == 0 for r in rows) and any(r["offered_before"] for r in rows)
+
+
+def test_page_has_the_tax_roll_tab_with_its_own_map(demo, tmp_path):
+    html = build_site([demo[1]], tmp_path / "site", None, None).read_text()
+    assert 'data-seg="roll"' in html and 'id="rollCard"' in html and 'id="rollMap"' in html and 'id="rollMode"' in html
+    assert 'id="rollFacts"' in html and 'id="noPulled"' in html
+    for opt in ("pull", "years", "paid", "offered"):
+        assert f'<option value="{opt}">' in html
+    assert html.count("data-seg=") == 5                                       # rentals, land, excluded, map, tax roll
+    for own in ("rollStreets", "rollRelief", "rollCities"):                    # the second map has its own background controls
+        assert f'id="{own}"' in html
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_js_adjusted_cap_and_roll_classes_match_the_python_scoring(demo):
+    d, _ = demo
+    scored = pd.read_csv(d / "analysis" / "scored.csv", dtype={"ain": str})
+    r = scored[scored["rank"].notna()].head(30)
+    script = f"""
+      const {{ adjustedCap, ROLL_MODES }} = require({json.dumps(str(JS))});
+      const rows = {r[["cap_rate", "p_stay", "adj_cap_rate"]].to_json(orient="records")};
+      const b = (mode, v, key) => ROLL_MODES[mode].of({{ [key]: v }});
+      console.log(JSON.stringify({{
+        adj: rows.map(x => adjustedCap(x.cap_rate, x.p_stay)),
+        years: [0, 4, 5, 9, 10, 19, 20, 45].map(v => b("years", v, "years_in_default")),
+        paid: [0, 0.049, 0.05, 0.499, 0.5, 0.949, 0.95, 1].map(v => b("paid", v, "paid_down_pct")),
+        pull: [1, 0.9, 0.851, 0.85, 0.5, 0.49, 0.2, 0.0].map(v => b("pull", v, "p_stay")),
+        offered: [0, 1, 2, 3, 7].map(v => b("offered", v, "offered_before")),
+        none: [b("years", null, "years_in_default"), b("paid", null, "paid_down_pct"), b("offered", null, "offered_before")],
+        shape: Object.values(ROLL_MODES).map(m => [m.labels.length, m.idx.length]),
+      }}));
+    """
+    out = json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout)
+    assert out["adj"] == pytest.approx(list(r["adj_cap_rate"]))               # the browser's ranking metric = the pipeline's
+    assert out["years"] == [0, 0, 1, 1, 2, 2, 3, 3]
+    assert out["paid"] == [0, 0, 1, 1, 2, 2, 3, 3]
+    assert out["pull"] == [0, 0, 0, 1, 2, 2, 2, 2]                             # chance pulled = 1 - odds; classes start at 15% and 50%
+    assert out["offered"] == [0, 1, 2, 3, 3] and out["none"] == [None, None, None]
+    assert all(a == b for a, b in out["shape"])                                # every mode has one colour step per label

@@ -199,7 +199,39 @@ for 2022A through 2025B (item, AIN, minimum bid, address with shapes).
 - **No CDN.** Leaflet 1.9.4 is vendored (`src/lacounty_tax/templates/vendor/leaflet`, byte-identical to the official release and to the copy in
   `la-county-elections`) and copied to `vendor/leaflet/` beside `index.html` by `build-site`, so the page works fully offline unless you switch on Streets.
 
+## Tax roll: how likely a parcel is to stay in the sale
+
+A parcel on the book can be paid off (redeemed) before the sale. Two county sources, both on the same ArcGIS Online host as the parcel layer, say how likely that is:
+
+```bash
+lacounty-tax pull-roll 2026B      # -> data/auctions/2026B/roll/<date>.csv       (~15 s; the weekly refresh runs it)
+lacounty-tax pull-history         # -> data/reference/auction_history.csv        (~15 s; once, or when a new book appears)
+lacounty-tax analyze 2026B        # re-scores with them
+```
+
+- **The Treasurer-Tax Collector's secured defaulted tax roll** (`TTC_Secured_Defaulted_Tax_Roll`, 1.7M rows, recomputed monthly): per account its tax status
+  (1 = delinquent, 2 = defaulted), the year it first defaulted, the amount needed to redeem today, a redemption date once paid, and the unpaid assessment years.
+  The county's minimum bid equals the redemption amount when the book was made (within 5% for 92% of 2026B accounts), so today's amount against the minimum
+  bid shows how much the owner has **already paid down**. On 2026B it matches the Assessor's `CURRENT` count exactly (128 redeemed: 96 listed with a date, 32 removed).
+- **Earlier auction books** (one layer per sale, 2022A to 2025B): how many times a parcel was **offered before** without leaving the roll (296 of 1,252).
+
+What the 2026B data shows (as of the roll date): parcels in default 10+ years have redeemed only about 1-2% of the time, against about 24-28% for those in default
+under 10 years; 27 of the 28 live `DELINQUENT` parcels have already paid off most of the original default (median 89% of it), so they are likely to be pulled.
+
+**Odds of staying in the sale** (`p_stay`, a screening estimate, not a forecast) = (1 - share of parcels with the same years in default already redeemed) x (1 - 0.75 if the
+parcel has paid off at least half its minimum bid). Both knobs are in `config/assumptions.toml` (`paid_down_threshold`, `paid_down_leave_prob`). The redemption
+shares are lower bounds for the period up to the roll's date: parcels already removed from the roll lost their default year, and the sale has not happened yet.
+`adj_cap_rate` = cap rate x `p_stay`, and **the ranking now uses it** (`rank_by = "cap"` restores the raw order; `rank_cap` is always kept). A parcel the roll
+shows as redeemed is excluded; `redemption_risk` comes from the odds (below 50% high, below 85% medium) whenever a roll exists, and falls back to the old
+heuristic without one. Offered-before is shown and filterable but not part of the odds (it overlaps with years in default).
+
+In the dashboard: the rentals table gains **Odds of sale**, **Adj. cap**, **Yrs in default**, **Paid down** and **Offered before** (sorted by adjusted cap), a
+"Hide likely-pulled" filter, and a **Tax roll** tab with its own map: every parcel coloured by chance of being pulled, years in default, share of the bid already
+paid, or times offered, with hollow rings for parcels already redeemed or off the roll. Click any parcel for its roll details. The tab and `p_stay` columns
+appear automatically when a roll snapshot exists.
+
 ## Roadmap
 
-All five phases plus the map are in place. Ideas not built: automatic discovery of new auction books, winning-bid history
-(to calibrate the bid multiple), alerts, Census rent cross-checks.
+All five phases, the map and the tax-roll signals are in place. Ideas not built: automatic discovery of new auction books, winning-bid history
+(to calibrate the bid multiple and the redemption odds against what really happened), alerts, Census rent cross-checks, using the Assessor
+parcel-data roll table instead of the portal API.
