@@ -11,7 +11,7 @@ from .assessor import AssessorClient, BlockedError
 from .analyze import Assumptions, run_analysis
 from .enrich import run_enrichment
 from .fetch import FetchError, download_pdf
-from .boundaries import write_cities
+from .boundaries import load_geojson, write_cities, write_geojson
 from .geo import GisClient, GisError, geocode_auction
 from .meta import AuctionMeta, save_meta
 from .parse import parse_pdf
@@ -142,7 +142,8 @@ def _cmd_fetch_boundaries(args: argparse.Namespace) -> int:
               "Find it on LA County GeoHub: 'City Boundaries' -> I want to use this -> API resources.", file=sys.stderr)
         return 2
     try:
-        n = write_cities(url, Path(args.out), name_field=args.name_field, simplify=args.simplify)
+        n = write_cities(url, Path(args.out), name_field=args.name_field, simplify=args.simplify,
+                         include_unincorporated=args.include_unincorporated)
     except BlockedError as e:
         print(f"error: {e}", file=sys.stderr)
         return 3
@@ -150,6 +151,19 @@ def _cmd_fetch_boundaries(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print(f"{n} city polygons -> {args.out}")
+    return 0
+
+
+def _cmd_load_boundaries(args: argparse.Namespace) -> int:
+    try:
+        fc = load_geojson(Path(args.geojson), name_field=args.name_field, simplify=args.simplify,
+                          include_unincorporated=args.include_unincorporated)
+    except (GisError, OSError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    n = write_geojson(fc, Path(args.out))
+    kinds = {k: sum(f["properties"]["kind"] == k for f in fc["features"]) for k in ("city", "unincorporated")}
+    print(f"{n} polygons ({kinds['city']} cities, {kinds['unincorporated']} unincorporated) -> {args.out}")
     return 0
 
 
@@ -260,7 +274,18 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--name-field", help="attribute holding the city name (detected by default)")
     b.add_argument("--simplify", type=float, default=0.0002, help="simplification tolerance in degrees (default ~20 m)")
     b.add_argument("--out", default="data/reference/boundaries/la_cities.geojson")
+    b.add_argument("--include-unincorporated", action="store_true",
+                   help="also keep unincorporated communities and islands (never the large AREA regions)")
     b.set_defaults(func=_cmd_fetch_boundaries)
+
+    lb = sub.add_parser("load-boundaries", help="build the map's city boundaries from a downloaded GeoJSON file")
+    lb.add_argument("geojson", help="GeoJSON downloaded from LA County GeoHub (City and Community Boundaries)")
+    lb.add_argument("--name-field", help="attribute holding the place name (detected by default)")
+    lb.add_argument("--simplify", type=float, default=0.0002, help="simplification tolerance in degrees (default ~20 m)")
+    lb.add_argument("--include-unincorporated", action="store_true",
+                    help="also keep unincorporated communities and islands (never the large AREA regions)")
+    lb.add_argument("--out", default="data/reference/boundaries/la_cities.geojson")
+    lb.set_defaults(func=_cmd_load_boundaries)
 
     d = sub.add_parser("make-demo", help="write a clearly fake demo auction for trying the dashboard")
     d.add_argument("--out", default="demo/auctions")

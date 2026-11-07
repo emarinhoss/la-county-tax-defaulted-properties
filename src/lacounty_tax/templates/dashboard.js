@@ -437,7 +437,10 @@ if (typeof document !== "undefined") (function () {
     $("lyCitiesWrap").hidden = false;
     $("map").dataset.cities = String(cities.features.length);
   }
-  const cityStyle = () => ({ color: isDark() ? "#a09f95" : "#6f6e69", weight: 1, opacity: 0.75, fill: false });
+  const cityStyle = () => (f) => ({
+    color: isDark() ? "#a09f95" : "#6f6e69", fill: false,
+    ...(f && f.properties && f.properties.kind === "unincorporated" ? { weight: 1, opacity: 0.5, dashArray: "2 4" } : { weight: 1, opacity: 0.8 }),
+  });
 
   function addCounty() {
     const county = DATA.boundaries && DATA.boundaries.county;

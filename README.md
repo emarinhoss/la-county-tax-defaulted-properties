@@ -147,16 +147,20 @@ are looked up once per parcel.
 - **County outline and limits.** The map draws a dashed Los Angeles County outline (`data/reference/boundaries/la_county.geojson`,
   from the Census Bureau's cartographic boundaries via the `us-atlas` package) and limits panning and zooming to the county and its
   surroundings. The outline is heavily generalized (1:10,000,000): fine for orientation, not exact along the border. City boundaries
-  come from the county's own city layer, downloaded once:
+  come from the county's own "City and Community Boundaries" layer (88 incorporated cities plus unincorporated areas). The easiest way,
+  with no API URL and no network access from this tool:
 
   ```bash
-  # URL: LA County GeoHub -> "City Boundaries" -> I want to use this -> API resources -> the layer URL ending in /<number>
-  lacounty-tax fetch-boundaries --url "https://.../MapServer/<n>"   # -> data/reference/boundaries/la_cities.geojson
+  # On LA County GeoHub open the dataset, choose Download -> GeoJSON (the CSV download has no shapes), then:
+  lacounty-tax load-boundaries city_layer.geojson     # -> data/reference/boundaries/la_cities.geojson
   ```
 
-  Commit that file and rebuild; the map then shows a "City boundaries" checkbox. The command pages through the layer, detects the
-  name field (or pass `--name-field`), simplifies shapes to about 20 m, and stops with a clear message if the layer looks wrong. It has
-  not been run against the live service.
+  By default only the 88 incorporated cities are kept. `--include-unincorporated` also keeps communities and islands (dotted lines),
+  but never the large "AREA" regions (Antelope Valley, Santa Clarita Valley, ...) that overlap the cities. Shapes are simplified to
+  about 20 m (`--simplify`). The name field is detected by which candidate is actually filled in (`CITY_COMM_NAME` in this layer;
+  override with `--name-field`). Alternatively `lacounty-tax fetch-boundaries --url <layer URL>` downloads straight from the ArcGIS
+  layer. Commit the result and rebuild; the map then shows a "City boundaries" checkbox. Neither command has been run on the layer's
+  real shapes yet; `tests/fixtures/la_city_layer_attributes.csv` is the layer's attribute table, used to test field detection.
 - **Basemap trouble.** If street tiles cannot load, the map retries with plain OpenStreetMap and then shows a visible warning. Tile
   servers refuse requests with no web address, so open the published site (or serve the folder with `python3 -m http.server`), not
   `_site/index.html` straight from disk.
