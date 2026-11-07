@@ -13,3 +13,6 @@ rehab_per_sqft_mid = 30     # 1950-1979
 rehab_per_sqft_old = 45     # before 1950
 recent_transfer_years = 3
 equity_ratio_flag = 10      # assessed value / min bid treated as "lots of owner equity"
+paid_down_threshold = 0.5   # share of the book's minimum bid already paid off that marks an account "paid down"
+paid_down_leave_prob = 0.75 # chance a paid-down account is pulled before the sale (assumption, not measured)
+rank_by = "adjusted"        # "adjusted" = cap rate x odds of staying in the sale; "cap" = raw cap rate

@@ -14,7 +14,10 @@
     "rehab_per_sqft_mid": 30,
     "rehab_per_sqft_old": 45,
     "recent_transfer_years": 3,
-    "equity_ratio_flag": 10
+    "equity_ratio_flag": 10,
+    "paid_down_threshold": 0.5,
+    "paid_down_leave_prob": 0.75,
+    "rank_by": "adjusted"
   },
   "items": 1252,
   "by_segment": {
@@ -30,5 +33,55 @@
   },
   "ranked": 111,
   "median_cap_rate": 0.2800944632775677,
-  "above_target": 98
+  "above_target": 98,
+  "roll": {
+    "snapshot": "2026-11-07.csv",
+    "rates": {
+      "all": {
+        "n": 1220,
+        "redeemed": 96,
+        "rate": 0.07868852459016394
+      },
+      "0": {
+        "n": 32,
+        "redeemed": 5,
+        "rate": 0.15625,
+        "pooled": false
+      },
+      "1-4": {
+        "n": 87,
+        "redeemed": 24,
+        "rate": 0.27586206896551724,
+        "pooled": false
+      },
+      "5-9": {
+        "n": 234,
+        "redeemed": 56,
+        "rate": 0.23931623931623933,
+        "pooled": false
+      },
+      "10-19": {
+        "n": 433,
+        "redeemed": 9,
+        "rate": 0.020785219399538105,
+        "pooled": false
+      },
+      "20+": {
+        "n": 434,
+        "redeemed": 2,
+        "rate": 0.004608294930875576,
+        "pooled": false
+      }
+    },
+    "on_roll": 1220,
+    "redeemed": 128
+  },
+  "history_sales": [
+    "2022A",
+    "2022B",
+    "2023A",
+    "2024A",
+    "2025A",
+    "2025B"
+  ]
 }

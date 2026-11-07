@@ -17,7 +17,9 @@ from .geo import GisClient, GisError, geocode_auction
 from .meta import AuctionMeta, save_meta
 from .parse import parse_pdf
 from .probe import BASE as PROBE_BASE, markdown_report, probe, sample_ains, to_json
+from .history import pull_history, write_history
 from .refresh import find_auctions, refresh_auction
+from .roll import pull_roll
 from .relief import ReliefError, write_relief
 from .site import build_site
 from .synthetic import make_demo
@@ -98,7 +100,8 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         fmr = read_fmr_csv(args.fmr)
         assumptions = Assumptions.from_toml(args.config) if args.config else Assumptions()
         out, res = run_analysis(auction_dir, fmr, assumptions,
-                                Path(args.snapshot) if args.snapshot else None)
+                                Path(args.snapshot) if args.snapshot else None,
+                                history_path=Path(args.history) if args.history else None)
     except (FileNotFoundError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -229,6 +232,46 @@ def _cmd_probe_gis(args: argparse.Namespace) -> int:
     return 0 if any(r.usable for r in reports) else 1
 
 
+def _cmd_pull_roll(args: argparse.Namespace) -> int:
+    auction_dir = Path(args.data_dir) / args.auction
+    if not (auction_dir / "items.csv").exists():
+        print(f"error: {auction_dir / 'items.csv'} not found; run `parse` first.", file=sys.stderr)
+        return 2
+    client = GisClient(None, lat_field="", lon_field="", min_interval=args.delay)
+
+    def progress(done: int, total: int) -> None:
+        print(f"  roll lookups {done}/{total}", file=sys.stderr)
+
+    try:
+        out, s = pull_roll(auction_dir, client, progress=progress)
+    except BlockedError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    except GisError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    live = s[s["on_roll"] & ~s["redeemed"]]
+    print(f"{args.auction}: {int(s['on_roll'].sum())}/{len(s)} parcels on the roll ({len(live)} live, "
+          f"{int(s['redeemed'].sum())} redeemed or removed) -> {out}")
+    return 0
+
+
+def _cmd_pull_history(args: argparse.Namespace) -> int:
+    client = GisClient(None, lat_field="", lon_field="", min_interval=args.delay)
+    try:
+        df = pull_history(client, only=args.sale)
+    except BlockedError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    except GisError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    out = write_history(df, Path(args.out))
+    per = df.groupby("sale").size().to_dict()
+    print(f"{len(df)} rows from {len(per)} earlier books ({', '.join(f'{k}: {v}' for k, v in per.items())}) -> {out}")
+    return 0
+
+
 def _cmd_make_demo(args: argparse.Namespace) -> int:
     fmr = read_fmr_csv(args.fmr)
     if "metro_default" not in fmr:
@@ -263,7 +306,7 @@ def _cmd_refresh(args: argparse.Namespace) -> int:
         r = refresh_auction(d, client, cache_dir=Path(args.cache_dir), fmr_path=Path(args.fmr),
                             config_path=Path(args.config) if args.config else None, today=today,
                             force=args.force, max_age_hours=args.cache_hours, limit=args.limit,
-                            gis_client=gis)
+                            gis_client=gis, history_path=Path(args.history) if args.history else None)
         results.append(r)
         print(f"{r.auction}: {r.status}: {r.detail}")
         if r.status == "blocked":                     # same site for every auction: stop hammering it
@@ -320,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
     z.add_argument("--fmr", default="data/reference/hud_safmr.csv")
     z.add_argument("--config", help="TOML file overriding the default assumptions")
     z.add_argument("--snapshot", help="enrichment snapshot CSV (default: the latest)")
+    z.add_argument("--history", default="data/reference/auction_history.csv",
+                   help="earlier-auction history from `pull-history` (used for the 'offered before' count)")
     z.add_argument("--top", type=int, default=15, help="rows to print (default 15)")
     z.set_defaults(func=_cmd_analyze)
 
@@ -376,6 +421,18 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--json", help="write the full results as JSON here")
     pr.set_defaults(func=_cmd_probe_gis)
 
+    pl = sub.add_parser("pull-roll", help="pull the Tax Collector's defaulted tax roll for an auction's parcels")
+    pl.add_argument("auction")
+    pl.add_argument("--data-dir", default="data/auctions")
+    pl.add_argument("--delay", type=float, default=0.2)
+    pl.set_defaults(func=_cmd_pull_roll)
+
+    ph = sub.add_parser("pull-history", help="list which parcels appeared in earlier auction books")
+    ph.add_argument("--out", default="data/reference/auction_history.csv")
+    ph.add_argument("--sale", action="append", help="only this sale id (e.g. 2025B); repeatable")
+    ph.add_argument("--delay", type=float, default=0.2)
+    ph.set_defaults(func=_cmd_pull_history)
+
     d = sub.add_parser("make-demo", help="write a clearly fake demo auction for trying the dashboard")
     d.add_argument("--out", default="demo/auctions")
     d.add_argument("--fmr", default="data/reference/hud_safmr.csv")
@@ -401,7 +458,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--today", help="override today's date (YYYY-MM-DD), for testing")
     r.add_argument("--force", action="store_true", help="refresh even if the sale date has passed")
     r.add_argument("--limit", type=int, help="only the first N parcels per auction")
-    r.add_argument("--no-geocode", action="store_true", help="skip the parcel coordinate lookup")
+    r.add_argument("--no-geocode", action="store_true", help="skip the parcel coordinate, tax roll and history lookups")
+    r.add_argument("--history", default="data/reference/auction_history.csv")
     r.add_argument("--gis-url", help="parcel layer query URL (default: LA County public parcel service)")
     r.add_argument("--ain-field", help="AIN field name in that layer (default AIN)")
     r.add_argument("--lat-field", help="attribute holding the parcel centre latitude (see `geocode --help`)")

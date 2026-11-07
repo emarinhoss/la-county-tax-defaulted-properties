@@ -206,3 +206,102 @@ def test_cli_load_fmr_text(tmp_path):
     out = tmp_path / "ref" / "fmr.csv"
     assert main(["load-fmr", str(src), "--year", "2027", "--out", str(out)]) == 0
     assert pd.read_csv(out, dtype={"zip": str}).shape[0] == 14
+
+
+# ---------------------------------------------------------------- tax roll signals and the risk-adjusted ranking
+from lacounty_tax.analyze import age_bucket, odds_of_sale, paid_down_pct, redemption_rates, risk_from_odds
+
+
+def roll_row(ain, years=15, amount=20_000.0, redeemed=False, on_roll=True, status="defaulted", rdate=None):
+    return dict(ain=ain, on_roll=on_roll, roll_status=status if on_roll else None, default_count=1, defaulted_year=2026 - years if years is not None else None,
+                years_in_default=years, redemption_amount=amount, compute_month="102026", redemption_date=rdate, redeemed=redeemed,
+                unpaid_years=3, oldest_unpaid_year=2020, sale_ref=None, deeded_year=None)
+
+
+def test_age_buckets():
+    assert [age_bucket(y) for y in (0, 1, 4, 5, 9, 10, 19, 20, 55)] == ["0", "1-4", "1-4", "5-9", "5-9", "10-19", "10-19", "20+", "20+"]
+    assert age_bucket(None) is None and age_bucket(float("nan")) is None and age_bucket(-3) == "0"
+
+
+def test_redemption_rates_by_bucket_pool_small_groups_and_skip_removed_parcels():
+    rows = [roll_row(f"a{i}", years=12, redeemed=i < 2) for i in range(40)]            # 10-19 yrs: 2 of 40 redeemed
+    rows += [roll_row(f"b{i}", years=7, redeemed=i < 5) for i in range(20)]             # 5-9 yrs: 5 of 20
+    rows += [roll_row(f"c{i}", years=25, redeemed=i == 0) for i in range(5)]            # 20+: only 5 parcels -> pooled
+    rows += [roll_row("gone", years=None, on_roll=False, redeemed=True)]               # removed: no default year, not counted
+    r = redemption_rates(pd.DataFrame(rows))
+    assert r["all"]["n"] == 65 and r["all"]["redeemed"] == 8
+    assert r["10-19"]["rate"] == pytest.approx(2 / 40) and r["5-9"]["rate"] == pytest.approx(5 / 20)
+    assert r["20+"]["pooled"] and r["20+"]["rate"] == pytest.approx(8 / 65)              # too few parcels: falls back to the overall rate
+    assert redemption_rates(None) == {} and redemption_rates(pd.DataFrame()) == {}
+
+
+def test_paid_down_and_odds_of_sale_arithmetic():
+    assert paid_down_pct(2_000, 20_000) == pytest.approx(0.9) and paid_down_pct(25_000, 20_000) == 0.0 and paid_down_pct(None, 5) is None
+    rates = {"all": {"rate": 0.08}, "10-19": {"rate": 0.02}, "5-9": {"rate": 0.24}}
+    assert odds_of_sale(A, rates, 12, 0.0) == pytest.approx(0.98)                         # old default, nothing paid
+    assert odds_of_sale(A, rates, 7, 0.0) == pytest.approx(0.76)
+    assert odds_of_sale(A, rates, 12, 0.9) == pytest.approx(0.98 * (1 - A.paid_down_leave_prob))   # mostly paid down
+    assert odds_of_sale(A, rates, 12, 0.4) == pytest.approx(0.98)                         # below the threshold: no extra penalty
+    assert odds_of_sale(A, rates, None, None) == pytest.approx(0.92)                      # unknown age: overall rate
+    assert odds_of_sale(A, {}, 12, None) == 1.0
+    assert [risk_from_odds(p) for p in (0.1, 0.49, 0.5, 0.84, 0.9)] == ["high", "high", "medium", "medium", "low"]
+
+
+def roll_for(items, **over):
+    rows = [roll_row(a, years=15, amount=float(m) * 1.0) for a, m in zip(items["ain"], items["min_bid"])]
+    for r in rows:
+        r.update(over.get(r["ain"], {}))
+    return pd.DataFrame(rows)
+
+
+def test_paid_down_parcel_drops_in_the_adjusted_ranking_but_keeps_its_raw_rank():
+    items, snap, fmr = make_inputs()
+    roll = roll_for(items, **{"1": {"redemption_amount": 1_000.0}})                      # item 1 (min bid 20,000) has paid 95% already
+    res = score(items, snap, fmr, A, ASOF, roll=roll).set_index("item")
+    assert res.loc[1, "paid_down_pct"] == pytest.approx(0.95) and res.loc[1, "p_stay"] < 0.3 and res.loc[1, "redemption_risk"] == "high"
+    assert res.loc[2, "p_stay"] > 0.9 and res.loc[2, "redemption_risk"] == "low"
+    assert res.loc[1, "rank_cap"] == 1 and res.loc[2, "rank_cap"] == 2                    # by raw cap rate nothing changed
+    assert res.loc[1, "rank"] == 2 and res.loc[2, "rank"] == 1                            # but the risk-adjusted order flipped
+    assert res.loc[1, "adj_cap_rate"] == pytest.approx(res.loc[1, "cap_rate"] * res.loc[1, "p_stay"])
+    cap_only = score(items, snap, fmr, Assumptions(rank_by="cap"), ASOF, roll=roll).set_index("item")
+    assert cap_only.loc[1, "rank"] == 1                                                   # rank_by = "cap" restores the old order
+
+
+def test_roll_redemption_excludes_a_parcel_the_assessor_still_lists():
+    items, snap, fmr = make_inputs()
+    roll = roll_for(items, **{"2": {"redeemed": True, "redemption_date": "2026-10-24", "redemption_amount": 0.0}})
+    res = score(items, snap, fmr, A, ASOF, roll=roll).set_index("item")
+    assert res.loc[2, "excluded"] == "redeemed_per_roll" and res.loc[2, "p_stay"] == 0.0 and res.loc[2, "redemption_date"] == "2026-10-24"
+    assert pd.isna(res.loc[2, "rank"]) and res.loc[1, "rank"] == 1
+
+
+def test_offered_before_and_roll_fields_reach_the_scored_table():
+    items, snap, fmr = make_inputs()
+    hist = pd.DataFrame({"sale": ["2025B", "2025A", "T"], "ain": ["1", "1", "1"]})
+    res = score(items, snap, fmr, A, ASOF, roll=roll_for(items, **{"1": {"sale_ref": "2027A #3347", "deeded_year": 2025}}), history=hist).set_index("item")
+    assert res.loc[1, "offered_before"] == 2 and res.loc[1, "offered_sales"] == "2025A,2025B"   # the current auction ("T") is not counted
+    assert res.loc[2, "offered_before"] == 0
+    assert res.loc[1, "years_in_default"] == 15 and res.loc[1, "sale_ref"] == "2027A #3347" and res.loc[1, "deeded_year"] == 2025
+
+
+def test_without_a_roll_nothing_changes():
+    items, snap, fmr = make_inputs()
+    res = score(items, snap, fmr, A, ASOF).set_index("item")
+    assert res["p_stay"].isna().all() and (res.loc[[1, 2], "adj_cap_rate"] == res.loc[[1, 2], "cap_rate"]).all()
+    assert res.loc[1, "rank"] == 1 and res.loc[1, "redemption_risk"] in ("low", "medium", "high")     # the old heuristic still applies
+
+
+def test_run_analysis_reads_the_latest_roll_and_history(tmp_path):
+    items, snap, fmr = make_inputs()
+    d = tmp_path / "data" / "T"
+    (d / "enrichment").mkdir(parents=True)
+    (d / "roll").mkdir()
+    items.to_csv(d / "items.csv", index=False)
+    snap.to_csv(d / "enrichment" / "2026-11-06.csv", index=False)
+    roll_for(items).to_csv(d / "roll" / "2026-11-07.csv", index=False)
+    pd.DataFrame({"sale": ["2025B"], "ain": ["1"]}).to_csv(tmp_path / "hist.csv", index=False)
+    _, res = run_analysis(d, fmr, A, history_path=tmp_path / "hist.csv")
+    assert res["p_stay"].notna().any() and res.set_index("item").loc[1, "offered_before"] == 1
+    import json as _json
+    summary = _json.loads((d / "analysis" / "summary.json").read_text())
+    assert summary["roll"]["snapshot"] == "2026-11-07.csv" and summary["roll"]["rates"]["all"]["n"] == 7 and summary["history_sales"] == ["2025B"]
