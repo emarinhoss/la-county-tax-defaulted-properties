@@ -160,16 +160,19 @@ are looked up once per parcel.
   By default only the 88 incorporated cities are kept. `--include-unincorporated` also keeps communities and islands (dotted lines),
   but never the large "AREA" regions (Antelope Valley, Santa Clarita Valley, ...) that overlap the cities. Shapes are simplified to
   about 20 m (`--simplify`). The name field is detected by which candidate is actually filled in (`CITY_COMM_NAME` in this layer;
-  override with `--name-field`). Alternatively `lacounty-tax fetch-boundaries --url <layer URL>` downloads straight from the ArcGIS
-  layer. Commit the result and rebuild; the map then shows a "City boundaries" checkbox.
+  override with `--name-field`). Alternatively `lacounty-tax fetch-boundaries` downloads straight from the county's ArcGIS Online layer
+  (`services.arcgis.com/RmCCgQtiZLDCtblq/.../admin_dist_SDE_DIST_DRP_CITY_COMM_BDY/FeatureServer/0`, the default; override with `--url`). That host
+  answered GitHub Actions runners in `la-county-elections`, unlike the county's own web servers. Commit the result and rebuild; the map then shows a "City boundaries" checkbox.
   The loader has been run on the real downloaded file (88 cities; 17 landmark checks all land in the right city; simplification error
   under 0.5% of area). `fetch-boundaries` has not been run against the live service. `tests/fixtures/la_city_layer_attributes.csv` is
   the layer's attribute table, used to test field detection.
-- **Basemap trouble.** If street tiles cannot load, the map retries with plain OpenStreetMap and then shows a visible warning. Tile
-  servers refuse requests with no web address, so open the published site (or serve the folder with `python3 -m http.server`), not
-  `_site/index.html` straight from disk.
-- **Needs internet in the browser.** Leaflet 1.9.4 loads from unpkg with integrity hashes and street tiles from CARTO/OpenStreetMap.
-  Offline, the Map tab shows a message and the rest of the page works.
+- **Streets or shapes.** A "Streets" checkbox switches the CARTO/OpenStreetMap tile basemap on and off. With it off, or when the tiles
+  cannot load (the map then retries with plain OpenStreetMap, unchecks the box and shows a warning), the county is drawn as a filled land
+  shape with the city lines on it, so the map always has a background. This is how the sister repo `la-county-elections` draws its map
+  (shapes only, no tiles). Tile servers refuse requests with no web address, so open the published site or serve the folder
+  (`python3 -m http.server`), not a bare file, if you want the streets.
+- **No CDN.** Leaflet 1.9.4 is vendored (`src/lacounty_tax/templates/vendor/leaflet`, byte-identical to the official release and to the copy in
+  `la-county-elections`) and copied to `vendor/leaflet/` beside `index.html` by `build-site`, so the page works offline except for the tiles.
 
 ## Roadmap
 

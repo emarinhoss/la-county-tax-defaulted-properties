@@ -4,7 +4,7 @@ import pytest
 
 import lacounty_tax.cli as cli
 from lacounty_tax.assessor import BlockedError
-from lacounty_tax.boundaries import fetch_cities, pick_name_field, write_cities
+from lacounty_tax.boundaries import DEFAULT_CITIES_URL, fetch_cities, pick_name_field, write_cities
 from lacounty_tax.cli import main
 from lacounty_tax.geo import GisError
 from test_assessor import Resp
@@ -72,8 +72,12 @@ def test_write_and_cli(tmp_path, monkeypatch, capsys):
     assert "2 city polygons" in capsys.readouterr().out
     assert len(json.loads(out.read_text())["features"]) == 2
     monkeypatch.delenv("LACOUNTY_CITIES_URL", raising=False)
-    assert main(["fetch-boundaries", "--out", str(out)]) == 2
-    assert "GeoHub" in capsys.readouterr().err
+    seen = []
+    monkeypatch.setattr(cli, "write_cities", lambda url, o, **k: seen.append(url) or 1)
+    assert main(["fetch-boundaries", "--out", str(out)]) == 0                 # no --url: the county's ArcGIS layer is the default
+    assert seen == [DEFAULT_CITIES_URL] and "services.arcgis.com/RmCCgQtiZLDCtblq" in seen[0]
+    monkeypatch.setenv("LACOUNTY_CITIES_URL", "https://example.test/Layer/1")
+    assert main(["fetch-boundaries", "--out", str(out)]) == 0 and seen[-1] == "https://example.test/Layer/1"
 
 
 def test_a_server_that_ignores_paging_cannot_loop_forever():

@@ -4,8 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LA Tax Auction Screen</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
 <style>/*CSS*/</style>
 </head>
 <body>
@@ -58,6 +57,7 @@
         <label class="chk"><input type="checkbox" id="lyRental" checked> Rentals</label>
         <label class="chk"><input type="checkbox" id="lyLand" checked> Land</label>
         <label class="chk"><input type="checkbox" id="lyExcl" checked> Excluded</label>
+        <label class="chk"><input type="checkbox" id="lyStreets" checked> Streets</label>
         <label class="chk" id="lyCitiesWrap" hidden><input type="checkbox" id="lyCities" checked> City boundaries</label>
       </div>
     </div>
@@ -85,8 +85,7 @@
 </main>
 <aside id="drawer" aria-label="Parcel details" hidden></aside>
 <div id="tip" role="tooltip" hidden></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="vendor/leaflet/leaflet.js"></script>
 <script type="application/json" id="data">/*DATA*/</script>
 <script>/*JS*/</script>
 </body>

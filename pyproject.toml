@@ -23,4 +23,4 @@ where = ["src"]
 testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-lacounty_tax = ["templates/*"]
+lacounty_tax = ["templates/*", "templates/vendor/leaflet/*", "templates/vendor/leaflet/images/*"]

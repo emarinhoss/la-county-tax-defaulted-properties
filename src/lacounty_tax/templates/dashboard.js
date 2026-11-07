@@ -400,7 +400,7 @@ if (typeof document !== "undefined") (function () {
 
   /* ---------- map ---------- */
   let map = null, markerLayer = null, tileLayer = null, tilesDark = null, lastFitKey = null;
-  let countyLayer = null, citiesLayer = null, tilesOk = 0, tilesBad = 0, usedFallback = false;
+  let countyLayer = null, citiesLayer = null, tilesOk = 0, tilesBad = 0, usedFallback = false, tilesDead = false;
   const TILES = {
     light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
     dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
@@ -421,8 +421,11 @@ if (typeof document !== "undefined") (function () {
         addTiles(TILES.fallback, "© OpenStreetMap contributors");
         return;
       }
+      tilesDead = true;
+      $("lyStreets").checked = false;                    // re-checking it tries the tiles again
+      applyBase();                                       // no streets: fill the county shape so the map still has a background
       const w = $("mapWarn");
-      w.textContent = "The street basemap could not be loaded, so only the parcels and the county outline are shown. " +
+      w.textContent = "The street basemap could not be loaded, so the county and city shapes are shown without streets. " +
         (location.protocol === "file:"
           ? "You opened this file straight from disk: tile servers refuse requests without a web address, so open the published site (or serve this folder, e.g. `python3 -m http.server`)."
           : "Check your connection or whether a browser extension is blocking cartocdn.com and openstreetmap.org.");
@@ -445,7 +448,7 @@ if (typeof document !== "undefined") (function () {
   function addCounty() {
     const county = DATA.boundaries && DATA.boundaries.county;
     if (!county) return;
-    countyLayer = L.geoJSON(county, { interactive: false, style: countyStyle() }).addTo(map);
+    countyLayer = L.geoJSON(county, { interactive: false, style: countyStyle(false) }).addTo(map);
     const b = countyLayer.getBounds();
     map.setMaxBounds(b.pad(0.35));                       // limit panning to the county and its surroundings
     map.setMinZoom(Math.max(7, map.getBoundsZoom(b.pad(0.35)) ));
@@ -454,7 +457,25 @@ if (typeof document !== "undefined") (function () {
     $("map").dataset.maxbounds = b.pad(0.35).toBBoxString();     // exposed for tests and debugging
     $("map").dataset.minzoom = map.getMinZoom();
   }
-  const countyStyle = () => ({ color: isDark() ? "#c3c2b7" : "#52514e", weight: 2, dashArray: "7 5", fill: false, opacity: 0.9 });
+  const streetsOn = () => $("lyStreets").checked && !tilesDead;
+  const countyStyle = (filled) => ({
+    color: isDark() ? "#c3c2b7" : "#52514e", weight: 2, dashArray: "7 5", opacity: 0.9,
+    fill: !!filled, fillColor: isDark() ? "#2b2b29" : "#ffffff", fillOpacity: 0.95,
+  });
+
+  // streets on: tile basemap; off (or failed): no tiles, the county shape itself is the land
+  function applyBase() {
+    if (streetsOn()) {
+      if (!tileLayer) usedFallback ? addTiles(TILES.fallback, "© OpenStreetMap contributors")
+        : addTiles(isDark() ? TILES.dark : TILES.light, "© OpenStreetMap contributors © CARTO", "abcd");
+    } else if (tileLayer) {
+      map.removeLayer(tileLayer);
+      tileLayer = null;
+      if (!tilesDead) $("mapWarn").hidden = true;
+    }
+    if (countyLayer) countyLayer.setStyle(countyStyle(!streetsOn()));
+    $("map").dataset.base = streetsOn() ? "streets" : "shapes";       // for tests and debugging
+  }
   const isDark = () => {
     const t = document.documentElement.dataset.theme;
     return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
@@ -483,25 +504,24 @@ if (typeof document !== "undefined") (function () {
     if (!map) {
       box.replaceChildren();
       map = L.map(box, { preferCanvas: true }).setView([34.05, -118.25], 9);
-      addCities();                                        // boundaries sit beneath the markers, cities under the county line
+      addCounty();                                        // county shape first (it can be filled), then city lines, then markers
+      addCities();
       if (citiesLayer && $("lyCities").checked) citiesLayer.addTo(map);
-      addCounty();
       markerLayer = L.layerGroup().addTo(map);
       box.addEventListener("keydown", (e) => { if (e.key === "Escape") map.closePopup(); });
     }
     map.invalidateSize();
     const dark = isDark();
-    if (tilesDark !== dark) {
-      usedFallback ? addTiles(TILES.fallback, "© OpenStreetMap contributors")
-        : addTiles(dark ? TILES.dark : TILES.light, "© OpenStreetMap contributors © CARTO", "abcd");
-      if (countyLayer) countyLayer.setStyle(countyStyle());
-      if (citiesLayer) citiesLayer.setStyle(cityStyle());
+    if (tilesDark !== dark) {                            // theme changed: new tiles (and shape colors)
+      if (tileLayer) { map.removeLayer(tileLayer); tileLayer = null; }
       tilesDark = dark;
+      if (citiesLayer) citiesLayer.setStyle(cityStyle());
     }
+    applyBase();
     markerLayer.clearLayers();
     if (citiesLayer) {
       const want = $("lyCities").checked;
-      if (want && !map.hasLayer(citiesLayer)) { citiesLayer.addTo(map); if (countyLayer) countyLayer.bringToFront(); }
+      if (want && !map.hasLayer(citiesLayer)) citiesLayer.addTo(map);
       if (!want && map.hasLayer(citiesLayer)) map.removeLayer(citiesLayer);
     }
 
@@ -680,7 +700,10 @@ if (typeof document !== "undefined") (function () {
   bind("noHighRedemption", "noHighRedemption", "change", (e) => e.target.checked);
   bind("noFallback", "noFallback", "change", (e) => e.target.checked);
   bind("onlyDefaulted", "onlyDefaulted", "change", (e) => e.target.checked);
-  ["lyRental", "lyLand", "lyExcl", "lyCities"].forEach((id) => $(id).addEventListener("change", render));
+  $("lyStreets").addEventListener("change", (e) => {
+    if (e.target.checked) { tilesDead = false; usedFallback = false; $("mapWarn").hidden = true; }
+  });
+  ["lyRental", "lyLand", "lyExcl", "lyCities", "lyStreets"].forEach((id) => $(id).addEventListener("change", render));
   $("reset").addEventListener("click", () => {
     Object.assign(state.f, { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false });
     $("loc").value = $("type").value = $("q").value = $("minCap").value = $("maxBid").value = "";

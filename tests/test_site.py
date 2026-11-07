@@ -105,12 +105,18 @@ def test_js_money_model_matches_python(demo):
     assert [x["cap"] for x in out[0]] == pytest.approx(list(r["cap_rate"]))
 
 
-def test_page_pins_leaflet_with_integrity_hashes_and_has_a_map_tab(demo):
-    html = render_html(collect([demo[1]]))
-    assert "leaflet@1.9.4/dist/leaflet.js" in html and "leaflet@1.9.4/dist/leaflet.css" in html
-    assert "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" in html      # leaflet.js 1.9.4
-    assert "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" in html      # leaflet.css 1.9.4
-    assert 'data-seg="map"' in html and 'id="mapCard"' in html
+def test_page_uses_vendored_leaflet_and_has_a_map_tab(demo, tmp_path):
+    out = build_site([demo[1]], tmp_path / "site", None)
+    html = out.read_text()
+    assert 'src="vendor/leaflet/leaflet.js"' in html and 'href="vendor/leaflet/leaflet.css"' in html
+    assert "unpkg.com" not in html                                            # no CDN dependency any more
+    import base64, hashlib
+    sri = lambda p: "sha256-" + base64.b64encode(hashlib.sha256(p.read_bytes()).digest()).decode()
+    v = tmp_path / "site" / "vendor" / "leaflet"
+    assert sri(v / "leaflet.js") == "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="    # the genuine 1.9.4 release
+    assert sri(v / "leaflet.css") == "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    assert (v / "LICENSE").exists() and (v / "images" / "layers.png").exists()
+    assert 'data-seg="map"' in html and 'id="mapCard"' in html and 'id="lyStreets"' in html
 
 
 BOUNDARIES = ROOT / "data" / "reference" / "boundaries"

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from importlib import resources
 from pathlib import Path
 
@@ -86,6 +87,8 @@ def build_site(data_dirs: list[Path], out_dir: Path, boundaries_dir: Path | None
         )
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / ".nojekyll").write_text("")
+    vendor = Path(str(resources.files("lacounty_tax").joinpath("templates", "vendor")))
+    shutil.copytree(vendor, out_dir / "vendor", dirs_exist_ok=True)      # Leaflet, so the page needs no CDN
     out = out_dir / "index.html"
     out.write_text(render_html(auctions, load_boundaries(boundaries_dir)))
     return out

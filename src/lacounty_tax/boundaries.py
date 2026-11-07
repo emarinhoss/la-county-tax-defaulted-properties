@@ -19,6 +19,11 @@ from pathlib import Path
 from .geo import GisClient, GisError, in_county
 
 MAX_PAGES = 100
+# The county's "City and Community Boundaries" layer in its ArcGIS Online organization (service name taken from the
+# organization's service directory recorded in the la-county-elections repo; layer 0 is assumed). That host answered
+# HTTP 200 to GitHub Actions runners there, unlike the county's own web servers.
+DEFAULT_CITIES_URL = ("https://services.arcgis.com/RmCCgQtiZLDCtblq/ArcGIS/rest/services/"
+                      "admin_dist_SDE_DIST_DRP_CITY_COMM_BDY/FeatureServer/0")
 NAME_CANDIDATES = ["city_comm_name", "city_name", "cityname", "cityname_alf", "city", "name", "label",
                    "city_label", "city_nm", "comm_name"]
 
