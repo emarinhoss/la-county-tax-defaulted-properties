@@ -400,17 +400,18 @@ if (typeof document !== "undefined") (function () {
 
   /* ---------- map ---------- */
   let map = null, markerLayer = null, tileLayer = null, tilesDark = null, lastFitKey = null;
-  let countyLayer = null, citiesLayer = null, tilesOk = 0, tilesBad = 0, usedFallback = false, tilesDead = false;
+  let countyLayer = null, landLayer = null, reliefLayer = null, citiesLayer = null;
+  let tilesOk = 0, tilesBad = 0, usedFallback = false, tilesDead = false;
   const TILES = {
     light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
     dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
     fallback: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
   };
 
+  // Optional street tiles (off by default). If they cannot load we quietly go back to the built-in background.
   function addTiles(url, attribution, subdomains) {
     if (tileLayer) map.removeLayer(tileLayer);
     tilesOk = tilesBad = 0;
-    $("mapWarn").hidden = true;
     tileLayer = L.tileLayer(url, { subdomains: subdomains || "abc", maxZoom: 19, attribution }).addTo(map);
     tileLayer.on("tileload", () => { tilesOk++; });
     tileLayer.on("tileerror", () => {
@@ -421,15 +422,10 @@ if (typeof document !== "undefined") (function () {
         addTiles(TILES.fallback, "© OpenStreetMap contributors");
         return;
       }
-      tilesDead = true;
-      $("lyStreets").checked = false;                    // re-checking it tries the tiles again
-      applyBase();                                       // no streets: fill the county shape so the map still has a background
-      const w = $("mapWarn");
-      w.textContent = "The street basemap could not be loaded, so the county and city shapes are shown without streets. " +
-        (location.protocol === "file:"
-          ? "You opened this file straight from disk: tile servers refuse requests without a web address, so open the published site (or serve this folder, e.g. `python3 -m http.server`)."
-          : "Check your connection or whether a browser extension is blocking cartocdn.com and openstreetmap.org.");
-      w.hidden = false;
+      tilesDead = true;                                  // give up silently: the land colour and relief are the background
+      $("lyStreets").checked = false;
+      $("streetsNote").textContent = "(unavailable)";
+      applyBase();
     });
   }
 
@@ -445,36 +441,56 @@ if (typeof document !== "undefined") (function () {
     ...(f && f.properties && f.properties.kind === "unincorporated" ? { weight: 1, opacity: 0.5, dashArray: "2 4" } : { weight: 1, opacity: 0.8 }),
   });
 
+  // Background = a solid land colour (the county shape) with an optional elevation-shading image on top of it.
+  // Separate panes keep the order: land colour (250) < relief image (300) < outlines, city lines and parcels (400+).
+  const landStyle = () => ({ stroke: false, fill: true, fillColor: isDark() ? "#2b2b29" : "#fbfbf9", fillOpacity: 1 });
+  const countyOutline = () => ({ color: isDark() ? "#c3c2b7" : "#52514e", weight: 2, dashArray: "7 5", opacity: 0.9, fill: false });
   function addCounty() {
     const county = DATA.boundaries && DATA.boundaries.county;
     if (!county) return;
-    countyLayer = L.geoJSON(county, { interactive: false, style: countyStyle(false) }).addTo(map);
+    for (const [name, z] of [["land", 250], ["relief", 300]]) {
+      const pane = map.createPane(name);
+      pane.style.zIndex = z;
+      pane.style.pointerEvents = "none";
+    }
+    landLayer = L.geoJSON(county, { pane: "land", renderer: L.svg({ pane: "land" }), interactive: false, style: landStyle() });
+    countyLayer = L.geoJSON(county, { interactive: false, style: countyOutline() }).addTo(map);
+    const R = DATA.relief;
+    if (R) {
+      reliefLayer = L.imageOverlay(R.url, R.bounds, { pane: "relief", interactive: false, attribution: R.attribution });
+      $("lyReliefWrap").hidden = false;
+    }
     const b = countyLayer.getBounds();
     map.setMaxBounds(b.pad(0.35));                       // limit panning to the county and its surroundings
-    map.setMinZoom(Math.max(7, map.getBoundsZoom(b.pad(0.35)) ));
+    map.setMinZoom(Math.max(7, map.getBoundsZoom(b.pad(0.35))));
     map.fitBounds(b);
     $("map").dataset.county = "1";
     $("map").dataset.maxbounds = b.pad(0.35).toBBoxString();     // exposed for tests and debugging
     $("map").dataset.minzoom = map.getMinZoom();
   }
   const streetsOn = () => $("lyStreets").checked && !tilesDead;
-  const countyStyle = (filled) => ({
-    color: isDark() ? "#c3c2b7" : "#52514e", weight: 2, dashArray: "7 5", opacity: 0.9,
-    fill: !!filled, fillColor: isDark() ? "#2b2b29" : "#ffffff", fillOpacity: 0.95,
-  });
+  const toggleLayer = (layer, on) => {
+    if (!layer) return;
+    if (on && !map.hasLayer(layer)) layer.addTo(map);
+    if (!on && map.hasLayer(layer)) map.removeLayer(layer);
+  };
 
-  // streets on: tile basemap; off (or failed): no tiles, the county shape itself is the land
   function applyBase() {
-    if (streetsOn()) {
+    const streets = streetsOn();
+    if (streets) {
       if (!tileLayer) usedFallback ? addTiles(TILES.fallback, "© OpenStreetMap contributors")
         : addTiles(isDark() ? TILES.dark : TILES.light, "© OpenStreetMap contributors © CARTO", "abcd");
     } else if (tileLayer) {
       map.removeLayer(tileLayer);
       tileLayer = null;
-      if (!tilesDead) $("mapWarn").hidden = true;
     }
-    if (countyLayer) countyLayer.setStyle(countyStyle(!streetsOn()));
-    $("map").dataset.base = streetsOn() ? "streets" : "shapes";       // for tests and debugging
+    const relief = !streets && !!reliefLayer && $("lyRelief").checked;
+    toggleLayer(landLayer, !streets);                    // street tiles already draw the land, so no colour under them
+    toggleLayer(reliefLayer, relief);
+    if (reliefLayer) reliefLayer.setOpacity(isDark() ? 0.8 : 1);
+    if (landLayer) landLayer.setStyle(landStyle());
+    if (countyLayer) countyLayer.setStyle(countyOutline());
+    $("map").dataset.base = streets ? "streets" : relief ? "relief" : "solid";       // for tests and debugging
   }
   const isDark = () => {
     const t = document.documentElement.dataset.theme;
@@ -701,9 +717,9 @@ if (typeof document !== "undefined") (function () {
   bind("noFallback", "noFallback", "change", (e) => e.target.checked);
   bind("onlyDefaulted", "onlyDefaulted", "change", (e) => e.target.checked);
   $("lyStreets").addEventListener("change", (e) => {
-    if (e.target.checked) { tilesDead = false; usedFallback = false; $("mapWarn").hidden = true; }
+    if (e.target.checked) { tilesDead = false; usedFallback = false; $("streetsNote").textContent = ""; }
   });
-  ["lyRental", "lyLand", "lyExcl", "lyCities", "lyStreets"].forEach((id) => $(id).addEventListener("change", render));
+  ["lyRental", "lyLand", "lyExcl", "lyCities", "lyStreets", "lyRelief"].forEach((id) => $(id).addEventListener("change", render));
   $("reset").addEventListener("click", () => {
     Object.assign(state.f, { loc: "", type: "", q: "", minCap: "", maxBid: "", noHighRehab: false, noHighRedemption: false, noFallback: false, onlyDefaulted: false });
     $("loc").value = $("type").value = $("q").value = $("minCap").value = $("maxBid").value = "";

@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 from .geo import read_coordinates
+from .relief import load_relief
 
 ROW_COLUMNS = [
     "item", "ain", "segment", "property_type", "min_bid", "property_address", "zip", "location",
@@ -53,6 +54,7 @@ def collect(data_dirs: list[Path]) -> list[dict]:
 
 
 DEFAULT_BOUNDARIES_DIR = Path("data/reference/boundaries")
+DEFAULT_RELIEF_DIR = Path("data/reference/relief")
 
 
 def load_boundaries(boundaries_dir: Path | None) -> dict:
@@ -65,12 +67,12 @@ def load_boundaries(boundaries_dir: Path | None) -> dict:
     return out
 
 
-def render_html(auctions: list[dict], boundaries: dict | None = None) -> str:
+def render_html(auctions: list[dict], boundaries: dict | None = None, relief: dict | None = None) -> str:
     tpl = resources.files("lacounty_tax").joinpath("templates")
     html = tpl.joinpath("dashboard.html").read_text()
     css = tpl.joinpath("dashboard.css").read_text()
     js = tpl.joinpath("dashboard.js").read_text()
-    data = json.dumps({"auctions": auctions, "boundaries": boundaries or {"county": None, "cities": None}},
+    data = json.dumps({"auctions": auctions, "boundaries": boundaries or {"county": None, "cities": None}, "relief": relief},
                       separators=(",", ":"), allow_nan=False)
     # Escape every "<" (valid JSON): stops "</script>" and "<!--<script" from confusing the HTML parser.
     data = data.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
@@ -78,7 +80,8 @@ def render_html(auctions: list[dict], boundaries: dict | None = None) -> str:
     return html.replace("/*CSS*/", css).replace("/*JS*/", js).replace("/*DATA*/", data)
 
 
-def build_site(data_dirs: list[Path], out_dir: Path, boundaries_dir: Path | None = DEFAULT_BOUNDARIES_DIR) -> Path:
+def build_site(data_dirs: list[Path], out_dir: Path, boundaries_dir: Path | None = DEFAULT_BOUNDARIES_DIR,
+               relief_dir: Path | None = DEFAULT_RELIEF_DIR) -> Path:
     auctions = collect(data_dirs)
     if not auctions:
         raise FileNotFoundError(
@@ -89,6 +92,10 @@ def build_site(data_dirs: list[Path], out_dir: Path, boundaries_dir: Path | None
     (out_dir / ".nojekyll").write_text("")
     vendor = Path(str(resources.files("lacounty_tax").joinpath("templates", "vendor")))
     shutil.copytree(vendor, out_dir / "vendor", dirs_exist_ok=True)      # Leaflet, so the page needs no CDN
+    relief = load_relief(relief_dir)
+    if relief:                                                            # the shaded-relief image sits beside index.html
+        (out_dir / "relief").mkdir(exist_ok=True)
+        shutil.copyfile(Path(relief_dir) / "la_relief.png", out_dir / "relief" / "la_relief.png")
     out = out_dir / "index.html"
-    out.write_text(render_html(auctions, load_boundaries(boundaries_dir)))
+    out.write_text(render_html(auctions, load_boundaries(boundaries_dir), relief))
     return out

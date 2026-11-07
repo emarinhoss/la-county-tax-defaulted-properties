@@ -16,6 +16,7 @@ from .geo import GisClient, GisError, geocode_auction
 from .meta import AuctionMeta, save_meta
 from .parse import parse_pdf
 from .refresh import find_auctions, refresh_auction
+from .relief import ReliefError, write_relief
 from .site import build_site
 from .synthetic import make_demo
 from .reference import load_safmr_xlsx, parse_safmr_text, read_fmr_csv
@@ -171,6 +172,21 @@ def _cmd_load_boundaries(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_build_relief(args: argparse.Namespace) -> int:
+    def progress(done: int, total: int) -> None:
+        print(f"  terrain tiles {done}/{total}", file=sys.stderr)
+
+    try:
+        meta = write_relief(Path(args.county), Path(args.out_dir), zoom=args.zoom, z_factor=args.z_factor, progress=progress)
+    except (ReliefError, OSError, ValueError, KeyError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    e = meta["elevation_m"] or {}
+    print(f"relief {meta['width']}x{meta['height']} px (z{meta['zoom']}, ~{meta['cell_m']} m/px), "
+          f"elevation {e.get('min', 0):.0f}..{e.get('max', 0):.0f} m -> {Path(args.out_dir) / 'la_relief.png'}")
+    return 0
+
+
 def _cmd_make_demo(args: argparse.Namespace) -> int:
     fmr = read_fmr_csv(args.fmr)
     if "metro_default" not in fmr:
@@ -183,7 +199,7 @@ def _cmd_make_demo(args: argparse.Namespace) -> int:
 def _cmd_build_site(args: argparse.Namespace) -> int:
     try:
         out = build_site([Path(d) for d in (args.data_dir or ["data/auctions"])], Path(args.out),
-                         Path(args.boundaries_dir))
+                         Path(args.boundaries_dir), Path(args.relief_dir) if args.relief_dir else None)
     except FileNotFoundError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -293,6 +309,13 @@ def main(argv: list[str] | None = None) -> int:
     lb.add_argument("--out", default="data/reference/boundaries/la_cities.geojson")
     lb.set_defaults(func=_cmd_load_boundaries)
 
+    rl = sub.add_parser("build-relief", help="build the shaded-relief (elevation) background image for the map")
+    rl.add_argument("--county", default="data/reference/boundaries/la_county.geojson", help="county outline to clip to")
+    rl.add_argument("--out-dir", default="data/reference/relief")
+    rl.add_argument("--zoom", type=int, default=10, help="terrain tile zoom (10 is ~110 m/pixel; 9 is smaller and coarser)")
+    rl.add_argument("--z-factor", type=float, default=2.0, help="vertical exaggeration of the shading (default 2)")
+    rl.set_defaults(func=_cmd_build_relief)
+
     d = sub.add_parser("make-demo", help="write a clearly fake demo auction for trying the dashboard")
     d.add_argument("--out", default="demo/auctions")
     d.add_argument("--fmr", default="data/reference/hud_safmr.csv")
@@ -301,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
     w = sub.add_parser("build-site", help="build the static dashboard (docs/index.html)")
     w.add_argument("--data-dir", action="append", help="folder of auctions; repeatable (default data/auctions)")
     w.add_argument("--out", default="docs")
+    w.add_argument("--relief-dir", default="data/reference/relief",
+                   help="folder with la_relief.png/.json from `build-relief` (elevation shading for the map background)")
     w.add_argument("--boundaries-dir", default="data/reference/boundaries",
                    help="folder with la_county.geojson (and optionally la_cities.geojson) for the map")
     w.set_defaults(func=_cmd_build_site)

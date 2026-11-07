@@ -57,12 +57,12 @@
         <label class="chk"><input type="checkbox" id="lyRental" checked> Rentals</label>
         <label class="chk"><input type="checkbox" id="lyLand" checked> Land</label>
         <label class="chk"><input type="checkbox" id="lyExcl" checked> Excluded</label>
-        <label class="chk"><input type="checkbox" id="lyStreets" checked> Streets</label>
+        <label class="chk" id="lyReliefWrap" hidden><input type="checkbox" id="lyRelief" checked> Elevation</label>
+        <label class="chk"><input type="checkbox" id="lyStreets"> Streets <span class="muted" id="streetsNote"></span></label>
         <label class="chk" id="lyCitiesWrap" hidden><input type="checkbox" id="lyCities" checked> City boundaries</label>
       </div>
     </div>
     <div class="maplegend" id="legend"></div>
-    <div class="mapwarn" id="mapWarn" role="status" hidden></div>
     <div id="map" role="region" aria-label="Map of parcels"></div>
     <p class="mapnote" id="mapNote"></p>
   </section>

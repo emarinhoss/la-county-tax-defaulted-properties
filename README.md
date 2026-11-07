@@ -166,13 +166,21 @@ are looked up once per parcel.
   The loader has been run on the real downloaded file (88 cities; 17 landmark checks all land in the right city; simplification error
   under 0.5% of area). `fetch-boundaries` has not been run against the live service. `tests/fixtures/la_city_layer_attributes.csv` is
   the layer's attribute table, used to test field detection.
-- **Streets or shapes.** A "Streets" checkbox switches the CARTO/OpenStreetMap tile basemap on and off. With it off, or when the tiles
-  cannot load (the map then retries with plain OpenStreetMap, unchecks the box and shows a warning), the county is drawn as a filled land
-  shape with the city lines on it, so the map always has a background. This is how the sister repo `la-county-elections` draws its map
-  (shapes only, no tiles). Tile servers refuse requests with no web address, so open the published site or serve the folder
-  (`python3 -m http.server`), not a bare file, if you want the streets.
+- **Background: solid colour + elevation, no map service.** By default the map needs no external service at all: the county is a solid
+  land colour on a grey surround, with a shaded-relief (hillshade) image of the terrain on top, the dashed county outline, the city lines
+  and the parcels. The relief is built once from public terrain tiles and committed:
+
+  ```bash
+  lacounty-tax build-relief      # -> data/reference/relief/la_relief.png + la_relief.json (~0.8 MB, 7 s, zoom 10 = ~127 m/pixel)
+  ```
+
+  It is a transparent overlay (black shadows, white highlights, clipped to the county), so it works over the light and dark land colours.
+  Elevation: Mapzen terrain tiles (NASA SRTM, USGS 3DEP and other public sources) on AWS Open Data; negative values (harbours) are
+  clamped to sea level. `--zoom 9` makes a smaller, coarser image; `--z-factor` changes the vertical exaggeration. Checkboxes: "Elevation"
+  turns the shading off (plain solid colour); "Streets" is off by default and switches to CARTO/OpenStreetMap street tiles; if those cannot
+  load, the box quietly unchecks itself and the built-in background stays (no error banner).
 - **No CDN.** Leaflet 1.9.4 is vendored (`src/lacounty_tax/templates/vendor/leaflet`, byte-identical to the official release and to the copy in
-  `la-county-elections`) and copied to `vendor/leaflet/` beside `index.html` by `build-site`, so the page works offline except for the tiles.
+  `la-county-elections`) and copied to `vendor/leaflet/` beside `index.html` by `build-site`, so the page works fully offline unless you switch on Streets.
 
 ## Roadmap
 
