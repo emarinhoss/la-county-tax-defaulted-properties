@@ -1,0 +1,130 @@
+<section class="card about" id="aboutCard" aria-label="How it works" hidden>
+  <h2>How this dashboard works</h2>
+  <p class="lede">The county auctions properties whose owners stopped paying property tax. This page screens the parcels in one auction book as
+    <strong>buy-and-hold rentals</strong>: it combines the book's minimum bid with Assessor property facts, HUD rents, the Tax Collector's
+    defaulted-tax roll and earlier auction books, then ranks the ones that could be rented. It tells you which parcels deserve a closer
+    look. It does not tell you what to bid. Numbers in <span class="live">this style</span> are read from the loaded data, so they always match what the
+    tabs show.</p>
+
+  <nav class="toc" aria-label="Sections">
+    <a href="#about-sources">Data and freshness</a><a href="#about-rentals">Rentals</a><a href="#about-land">Land</a>
+    <a href="#about-excluded">Excluded</a><a href="#about-map">Map</a><a href="#about-roll">Tax roll</a>
+    <a href="#about-controls">Controls</a><a href="#about-assumptions">Assumptions</a><a href="#about-glossary">Glossary</a><a href="#about-limits">Limits</a>
+  </nav>
+
+  <h3 id="about-sources">Where the data comes from, and how fresh it is</h3>
+  <ul id="aboutSources" class="plain"></ul>
+  <p>A scheduled run refreshes the Assessor data, the tax roll and the scores every week, and stops after the sale date recorded for the auction (if one is set), keeping the last snapshot.
+    Coordinates and boundaries do not change, so they are fetched once.</p>
+
+  <h3 id="about-rentals">Rentals tab</h3>
+  <p><strong>Which parcels.</strong> Parcels the book flags as <em>improved</em> and gives a street address for
+    (<span class="live" data-bind="n.rentals">0</span> of them are still ranked). Parcels that cannot be assessed as rentals are moved to
+    the Excluded tab with a reason.</p>
+  <p><strong>Rent.</strong> HUD's Small Area Fair Market Rent for the parcel's ZIP code and bedroom count. For 2 to 4 unit buildings the bedrooms are split
+    evenly across the units and the rents added up. Above four bedrooms, each extra bedroom adds 15% to the four-bedroom rent. HUD's figure is roughly the
+    40th-percentile rent for the ZIP, so it is a conservative, ZIP-level estimate, not a comparable-sales rent. More than a third of LA ZIP codes carry HUD's
+    single metro-wide fallback rent; the table's filter can hide them. A "rent factor" (currently <span class="live" data-bind="a.rent_factor" data-fmt="x">1×</span>) scales every rent.</p>
+  <p><strong>Cap rate</strong> is net income divided by what you would have spent:</p>
+<pre class="formula">price paid       = minimum bid × expected winning-bid multiple   (the slider; now <span class="live" data-bind="state.m" data-fmt="x">1×</span>)
+collected rent   = 12 × monthly rent × (1 − vacancy <span class="live" data-bind="a.vacancy_rate" data-fmt="pct0">6%</span>)
+net income       = collected rent × (1 − operating costs <span class="live" data-bind="a.opex_pct" data-fmt="pct0">25%</span>) − property tax <span class="live" data-bind="a.property_tax_rate" data-fmt="pct2">1.25%</span> × price paid
+all-in cost      = price paid × (1 + closing costs <span class="live" data-bind="a.closing_cost_pct" data-fmt="pct0">3%</span>) + rehab estimate
+cap rate         = net income ÷ all-in cost</pre>
+  <p><strong>Rehab estimate</strong> is the living area times a per-square-foot rate by year built
+    (<span class="live" data-bind="a.rehab_per_sqft_new" data-fmt="usd">$15</span> for 1980 or later,
+    <span class="live" data-bind="a.rehab_per_sqft_mid" data-fmt="usd">$30</span> for 1950 to 1979,
+    <span class="live" data-bind="a.rehab_per_sqft_old" data-fmt="usd">$45</span> before 1950 or unknown), never less than
+    <span class="live" data-bind="a.rehab_min" data-fmt="usd">$10,000</span>. These are placeholders to tune, not quotes.</p>
+  <p><strong>Max bid and headroom.</strong> The highest price at which the cap rate still equals your target
+    (<span class="live" data-bind="state.target" data-fmt="pct1">8.0%</span>); headroom is that figure divided by the minimum bid.</p>
+<pre class="formula">max bid  = (collected rent × (1 − operating costs) − target × rehab) ÷ (property tax rate + target × (1 + closing costs))
+headroom = max bid ÷ minimum bid</pre>
+  <p><strong>Odds of sale and Adj. cap.</strong> A cap rate means nothing if the parcel is paid off before the auction. <em>Odds of sale</em> is the estimated chance
+    the parcel actually reaches the sale (see the Tax roll section). <em>Adj. cap</em> is the cap rate times those odds, and <strong>the rank (#) uses it</strong>
+    (ranking mode: <span class="live" data-bind="a.rank_by" data-fmt="raw">adjusted</span>). Click the Cap rate header to see the raw order instead.</p>
+  <p><strong>Rehab risk</strong> is a condition proxy, not an inspection. Points: year built unknown +1, built 1940 to 1959 +1, built before 1940 +2; building value under the
+    land value +1, under half of it +2 (missing values +1). Four or more points is high, two or three medium, otherwise low.</p>
+  <p><strong>Redemption risk</strong> comes from the odds of sale when a tax roll exists: below 50% is high, below 85% medium, otherwise low. Without a roll it falls
+    back to a rougher rule: a transfer within <span class="live" data-bind="a.recent_transfer_years" data-fmt="num">3</span> years, assessed value at least
+    <span class="live" data-bind="a.equity_ratio_flag" data-fmt="x">10×</span> the minimum bid, or a changed tax status each count as one signal (two or more is high).</p>
+  <p><strong>Tax status.</strong> <em>DEFAULTED</em> is the normal case. <em>DELINQUENT</em> parcels are marked ⚑: the roll shows they have usually already paid off most of the
+    original default, so they are likely to be pulled. <em>CURRENT</em> parcels have paid and are excluded.</p>
+  <p><strong>The five tiles at the top.</strong> Parcels in the auction; Rentals ranked; how many ranked rentals are at or above the target cap rate
+    (using the <em>raw</em> cap rate, at the slider's bid multiple); the median cap rate of the ranked rentals; and how many parcels are excluded.
+    The two charts show the spread of cap rates, and minimum bid against cap rate on a log scale.</p>
+
+  <h3 id="about-land">Land tab</h3>
+  <p>Parcels the book does not flag as improved (<span class="live" data-bind="n.land">0</span> in play). There is no rent model for land, so the tab
+    shows what the minimum bid buys. <em>$ per lot sq ft</em> is the minimum bid divided by the lot size. <em>Bid ÷ assessed</em> is the minimum bid divided by the
+    Assessor's land plus improvement value, which is usually well below market value, so treat it as a rough guide. A condo's "lot size" is the whole tract, not the unit. Odds of
+    sale, years in default and offered-before work as on the other tabs.</p>
+
+  <h3 id="about-excluded">Excluded tab</h3>
+  <p>Every parcel left out of the rankings, with the reason. Nothing is deleted, so you can see what was set aside and why:</p>
+  <div class="scroll"><table class="mini"><thead><tr><th>Reason</th><th>Meaning</th><th class="num">Parcels</th></tr></thead><tbody id="aboutReasons"></tbody></table></div>
+
+  <h3 id="about-map">Map tab</h3>
+  <p>Every parcel with coordinates, from the county's parcel layer (the parcel's centre point, so vacant lots without a street address are placed too).
+    Rentals are coloured by <strong>cap rate</strong> in up to six classes with equal numbers of parcels, recomputed from whatever the filters and slider currently show;
+    on the light background darker means a higher cap rate (on the dark theme, lighter). Land and excluded parcels are small grey dots. Hover for a summary and
+    click for the full detail panel. The checkboxes switch parcel groups on and off.</p>
+  <p><strong>Background.</strong> A solid land colour in the shape of the county, with a shaded-relief image of the terrain (computed from public elevation data) and the
+    county outline and city boundaries on top. None of this needs an online map service. <em>Streets</em> optionally swaps in a street map (CARTO and OpenStreetMap); if it cannot
+    load, the page quietly keeps the built-in background.</p>
+
+  <h3 id="about-roll">Tax roll tab</h3>
+  <p>A parcel can be paid off before the sale. Two county sources say how likely that is:</p>
+  <ul>
+    <li><strong>The Treasurer-Tax Collector's defaulted tax roll.</strong> For each account: the year it first defaulted, the amount needed to redeem today, a redemption date once paid, and the unpaid years.
+      The county sets a parcel's minimum bid at its redemption amount when the book is made, so <em>today's amount against the minimum bid</em> shows how much the owner has already paid
+      down. A parcel with a redemption date, or that has left the roll, is redeemed.</li>
+    <li><strong>Earlier auction books.</strong> <em>Offered before</em> counts how many earlier books listed the parcel (it was offered and did not leave the roll). It is shown and filterable but
+      is not part of the odds, because it largely overlaps with years in default.</li>
+  </ul>
+  <p><strong>Odds of staying in the sale</strong> are a screening estimate, not a forecast:</p>
+<pre class="formula">odds = (1 − share already redeemed among parcels with the same years in default)
+       × (1 − <span class="live" data-bind="a.paid_down_leave_prob" data-fmt="pct0">75%</span> if the parcel has paid off at least <span class="live" data-bind="a.paid_down_threshold" data-fmt="pct0">50%</span> of its minimum bid)
+paid off = 1 − redemption amount today ÷ minimum bid       (a redeemed parcel has odds 0)</pre>
+  <p>The redeemed shares are measured on this auction's roll, so they update with it:</p>
+  <div class="scroll"><table class="mini"><thead><tr><th>Years in default</th><th class="num">Parcels</th><th class="num">Redeemed so far</th><th class="num">Share used</th></tr></thead><tbody id="aboutRates"></tbody></table></div>
+  <p class="small">Buckets with fewer than 15 parcels use the overall share. The shares are lower bounds for the period up to the roll's date: parcels already removed from the roll lost their default year and are not
+    counted, and the sale itself has not happened yet. The paid-off penalty is an assumption, not a measurement.</p>
+  <p><strong>The map</strong> colours every parcel by one of four views, chosen at the top: the <em>chance it is pulled</em> (1 − odds: under 15%, 15 to 50%, 50% or more), <em>years in default</em> (under 5, 5 to 9,
+    10 to 19, 20 or more), <em>share of the bid already paid</em> (under 5%, 5 to 50%, 50 to 95%, 95% or more), or <em>times offered before</em> (never, once, twice, three or more). Hollow rings are parcels already redeemed
+    or off the roll. The strip above the map gives the totals. Click a parcel for its roll details.</p>
+
+  <h3 id="about-controls">Controls</h3>
+  <ul>
+    <li><strong>Expected winning bid</strong> (slider): the minimum bid is only a floor, and winning bids are usually higher. Moving the slider recomputes every cap rate, rank, max bid and tile for that multiple.</li>
+    <li><strong>Target cap rate</strong> sets the max bid and the "at or above target" count. <strong>Min cap rate</strong> hides parcels below a cap rate.</li>
+    <li><strong>Hide</strong> filters remove high rehab risk, high redemption risk, HUD fallback rents, parcels that are not DEFAULTED, and parcels whose odds are under 50%.
+      Search, jurisdiction, type and a maximum minimum bid narrow the list. The filters apply to the table, the charts and both maps (the rental-only ones, such as cap rate and risk, act on rentals). <strong>Reset</strong> clears them.</li>
+    <li><strong>Click any row or map dot</strong> for the detail panel: the return model line by line, the roll facts, and a checklist of what to verify before bidding.</li>
+  </ul>
+
+  <h3 id="about-assumptions">Assumptions in use</h3>
+  <p>Every figure below is an assumption you can change in <code>config/assumptions.toml</code>; the next refresh re-scores with it.</p>
+  <div class="scroll"><table class="mini"><thead><tr><th>Setting</th><th class="num">Value</th><th>What it does</th></tr></thead><tbody id="aboutAssumptions"></tbody></table></div>
+
+  <h3 id="about-glossary">Glossary</h3>
+  <dl class="glossary">
+    <dt>AIN</dt><dd>Assessor's Identification Number: the 10-digit parcel number used to join every source.</dd>
+    <dt>Minimum bid</dt><dd>The least the county will accept: roughly the back taxes, penalties and costs owed. A floor, not a price.</dd>
+    <dt>Redeemed</dt><dd>The owner paid what was owed, so the parcel is taken out of the sale.</dd>
+    <dt>Defaulted / delinquent</dt><dd>Defaulted: taxes unpaid long enough to be eligible for sale. Delinquent (roll status 1): this year's tax is unpaid on an account that has already settled most of its older default.</dd>
+    <dt>Cap rate</dt><dd>Yearly net income divided by total cost. A quick way to compare properties, not a guaranteed return.</dd>
+    <dt>HUD Small Area Fair Market Rent</dt><dd>HUD's rent figure for a ZIP code and bedroom count, about the 40th percentile of local rents.</dd>
+    <dt>Offered before</dt><dd>How many earlier auction books listed this parcel.</dd>
+    <dt>Shaded relief</dt><dd>A picture of the terrain made by lighting the elevation data from the north-west.</dd>
+  </dl>
+
+  <h3 id="about-limits">What this does not tell you</h3>
+  <ul>
+    <li>The minimum bid is a floor. Winning bids are usually higher, so use the slider before trusting a cap rate.</li>
+    <li>Rents are ZIP-level HUD figures, not comparable listings. Rehab and redemption risks are rules of thumb. Odds of sale are estimates from this auction's own roll and are not calibrated against real outcomes yet.</li>
+    <li>Liens that survive the sale (IRS, HOA, municipal), occupancy, title problems and zoning are not checked. You cannot inspect a tax-sale property beforehand.</li>
+    <li>Assessed values usually lag market value, especially for long-held parcels.</li>
+    <li>This is a screening aid, not financial or legal advice. Verify everything with the county and a title professional before bidding.</li>
+  </ul>
+</section>

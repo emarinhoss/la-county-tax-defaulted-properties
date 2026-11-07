@@ -41,6 +41,8 @@ def load_auction(auction_dir: Path) -> dict | None:
         "synthetic": bool(meta.get("synthetic", False)),
         "label": meta.get("label"),
         "assumptions": meta["assumptions"],
+        "roll": meta.get("roll"),                              # snapshot name, redemption rates, counts (for the "How it works" tab)
+        "history_sales": meta.get("history_sales"),
         "rows": json.loads(df.to_json(orient="records")),   # NaN -> null
     }
 
@@ -74,6 +76,7 @@ def render_html(auctions: list[dict], boundaries: dict | None = None, relief: di
     tpl = resources.files("lacounty_tax").joinpath("templates")
     html = tpl.joinpath("dashboard.html").read_text()
     css = tpl.joinpath("dashboard.css").read_text()
+    html = html.replace("<!--ABOUT-->", tpl.joinpath("about.html").read_text())
     js = tpl.joinpath("dashboard.js").read_text()
     data = json.dumps({"auctions": auctions, "boundaries": boundaries or {"county": None, "cities": None}, "relief": relief},
                       separators=(",", ":"), allow_nan=False)

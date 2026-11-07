@@ -115,3 +115,24 @@ a { color: var(--series); }
 .fact { display: flex; flex-direction: column; line-height: 1.15; }
 .fact strong { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
 .fact span { color: var(--ink-3); font-size: .78rem; }
+
+.about { max-width: 920px; margin-left: auto; margin-right: auto; padding: 18px 22px 24px; }
+.about h2 { font-size: 1.3rem; margin-bottom: 6px; }
+.about h3 { font-size: 1.02rem; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 28px 0 8px; padding-top: 14px; border-top: 1px solid var(--line); scroll-margin-top: 12px; }
+.about p, .about li, .about dd { max-width: 78ch; }
+.about .lede { font-size: 1.02rem; color: var(--ink-2); }
+.about .small { color: var(--ink-3); font-size: .82rem; }
+.about ul { padding-left: 1.2em; } .about ul.plain { list-style: none; padding-left: 0; }
+.about ul.plain li { margin: 5px 0; }
+.about .live { font-weight: 650; border-bottom: 1px dotted var(--ink-3); }
+.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; }
+.toc a { text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; font-size: .84rem; color: var(--ink-2); background: var(--surface); }
+.toc a:hover { border-color: var(--ink-3); color: var(--ink); }
+pre.formula { background: var(--grid); border-radius: 8px; padding: 10px 14px; overflow-x: auto; font: .84rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 8px 0 12px; max-width: 100%; }
+pre.formula .live { border-bottom: 1px dotted var(--ink-3); }
+table.mini { font-size: .84rem; margin: 6px 0 10px; } table.mini td, table.mini th { white-space: normal; vertical-align: top; }
+table.mini th { font-size: .74rem; color: var(--ink-2); text-transform: uppercase; letter-spacing: .03em; }
+table.mini tbody tr { cursor: default; } table.mini tbody tr:hover { background: transparent; }
+.glossary { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 6px 0; }
+.glossary dt { font-weight: 650; } .glossary dd { margin: 0; color: var(--ink-2); }
+@media (max-width: 640px) { .glossary { grid-template-columns: 1fr; } .glossary dd { margin-bottom: 6px; } .about { padding: 14px; } }

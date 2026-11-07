@@ -31,6 +31,7 @@
       <button type="button" role="tab" data-seg="excluded" aria-selected="false">Excluded <span class="c"></span></button>
       <button type="button" role="tab" data-seg="map" aria-selected="false">Map <span class="c"></span></button>
       <button type="button" role="tab" data-seg="roll" aria-selected="false">Tax roll <span class="c"></span></button>
+      <button type="button" role="tab" data-seg="about" aria-selected="false">How it works <span class="c"></span></button>
     </div>
     <div class="row" id="rentalOnly">
       <label class="fld">Expected winning bid, as a multiple of the minimum
@@ -41,7 +42,7 @@
       <label class="chk"><input type="checkbox" id="noHighRedemption"> Hide high redemption risk</label>
       <label class="chk"><input type="checkbox" id="noFallback"> Hide HUD metro-wide fallback rents</label>
     </div>
-    <div class="row">
+    <div class="row" id="filterRow">
       <label class="fld">Search<input type="text" id="q" placeholder="address, ZIP, item, AIN" style="width:210px"></label>
       <label class="fld">Jurisdiction<select id="loc"></select></label>
       <label class="fld" id="typeWrap">Type<select id="type"></select></label>
@@ -91,6 +92,8 @@
     <p class="mapnote" id="rollNote"></p>
     <p class="mapnote">Source: the Treasurer-Tax Collector's secured defaulted tax roll and the county's earlier auction books. Click a parcel for its roll details.</p>
   </section>
+
+  <!--ABOUT-->
 
   <section class="charts" id="chartsSec" aria-label="Charts">
     <div class="card"><h2 id="t1"></h2><div class="chart" id="chart1"></div></div>

@@ -108,6 +108,7 @@ if (typeof document !== "undefined") (function () {
     excluded: (r) => !!r.excluded,
     map: () => true,
     roll: () => true,
+    about: () => true,
   };
 
   function passes(r) {
@@ -373,6 +374,92 @@ if (typeof document !== "undefined") (function () {
     const more = $("more");
     more.hidden = sorted.length <= state.shown;
     more.textContent = `Show more (${Math.min(40, sorted.length - state.shown)} of ${sorted.length - state.shown} remaining)`;
+  }
+
+  /* ---------- "How it works" tab ---------- */
+  const REASON_HELP = {
+    tax_current: "The Assessor lists the parcel's taxes as paid (status CURRENT): it was redeemed and will not be sold.",
+    redeemed_per_roll: "The tax roll shows a redemption date for the parcel, or the parcel has left the roll.",
+    enrichment_failed: "The Assessor lookup for this parcel failed; it is retried on the next refresh.",
+    not_enriched: "No Assessor data has been pulled for this parcel yet.",
+    improved_flag_without_address: "The book flags it as improved but gives no street address (a vacant lot), so it is set aside for a manual look.",
+    no_residential_units: "The Assessor reports no residential units (commercial, industrial or unclear use).",
+    multi_unit_5plus: "More than four units: outside the 1 to 4 unit focus of the rent model.",
+    no_fmr_for_zip: "HUD publishes no rent for this ZIP code.",
+    no_bedroom_data: "The Assessor has no bedroom count, so a rent cannot be estimated.",
+  };
+  const ASSUMPTION_ROWS = [
+    ["vacancy_rate", "Vacancy", "pct0", "Share of the year the rent is not collected."],
+    ["opex_pct", "Operating costs", "pct0", "Insurance, maintenance and management, as a share of collected rent."],
+    ["property_tax_rate", "Property tax", "pct2", "Charged on the price paid (California resets assessed value to the purchase price)."],
+    ["closing_cost_pct", "Closing costs", "pct0", "Fees and recording, on top of the price."],
+    ["target_cap_rate", "Target cap rate", "pct1", "Drives the max bid and the \"at or above target\" count (also editable on the page)."],
+    ["bid_multiple", "Expected winning bid", "x", "Price paid as a multiple of the minimum bid; the slider's starting point."],
+    ["rent_factor", "Rent factor", "x", "Scales every HUD rent."],
+    ["rehab_min", "Minimum rehab", "usd", "Floor for the rehab estimate."],
+    ["rehab_per_sqft_new", "Rehab per sq ft, built 1980 or later", "usd", "Placeholder, not a quote."],
+    ["rehab_per_sqft_mid", "Rehab per sq ft, built 1950 to 1979", "usd", "Placeholder, not a quote."],
+    ["rehab_per_sqft_old", "Rehab per sq ft, before 1950 or unknown", "usd", "Placeholder, not a quote."],
+    ["paid_down_threshold", "\"Paid down\" threshold", "pct0", "Share of the minimum bid already paid off that marks an account as paid down."],
+    ["paid_down_leave_prob", "Chance a paid-down account is pulled", "pct0", "Assumed, not measured; it lowers the odds of sale."],
+    ["rank_by", "Ranking", "raw", "\"adjusted\" ranks by cap rate × odds of sale; \"cap\" by the raw cap rate."],
+    ["recent_transfer_years", "Recent-transfer window (fallback rule)", "num", "Used for redemption risk only when there is no tax roll."],
+    ["equity_ratio_flag", "Equity flag (fallback rule)", "x", "Assessed value ÷ minimum bid treated as a lot of owner equity; fallback rule only."],
+  ];
+  const fmtBound = (v, fmt) => {
+    if (v == null) return null;
+    switch (fmt) {
+      case "pct0": return fmtPct(v, 0);
+      case "pct1": return fmtPct(v, 1);
+      case "pct2": return fmtPct(v, 2);
+      case "usd": return fmtUsd(v);
+      case "num": return fmtNum(v);
+      case "x": return fmtX(v);
+      default: return String(v);
+    }
+  };
+
+  function renderAbout() {
+    const A = auction.assumptions || {};
+    const counts = { rentals: rows.filter((r) => r.eligible).length, land: rows.filter(inSeg.land).length };
+    // live values written into the prose: data-bind="a.<assumption>" | "state.<key>" | "n.<count>"
+    document.querySelectorAll("#aboutCard [data-bind]").forEach((el) => {
+      const [root, key] = el.dataset.bind.split(".");
+      const v = root === "a" ? A[key] : root === "state" ? state[key] : root === "n" ? counts[key] : undefined;
+      const text = fmtBound(v, el.dataset.fmt);
+      if (text != null) el.textContent = text;
+    });
+
+    const roll = auction.roll;
+    const sources = [
+      ["Auction book", `The county's resolution list for ${auction.id}: item, AIN, minimum bid, improvement flag and address, read from the PDF.`],
+      ["Assessor parcel data", `Units, bedrooms, baths, living area, lot size, year built, assessed values, tax status and last transfer, from the Assessor portal. Pulled ${auction.snapshot}.`],
+      ["Rents", "HUD Small Area Fair Market Rents by ZIP code and bedroom count."],
+      ["Coordinates", "The centre point of each parcel, from the county's assessor parcel layer."],
+      ["Tax roll", roll ? `The Treasurer-Tax Collector's secured defaulted tax roll, snapshot ${String(roll.snapshot).replace(".csv", "")}: ${fmtNum(roll.on_roll)} parcels on the roll, ${fmtNum(roll.redeemed)} redeemed or removed.`
+        : "Not loaded for this auction yet (run pull-roll)."],
+      ["Earlier auction books", auction.history_sales && auction.history_sales.length ? `Parcels listed in ${auction.history_sales.join(", ")}.` : "Not loaded yet (run pull-history)."],
+      ["Boundaries and terrain", "County and city outlines from the county's boundary layer; shaded relief computed from public elevation data (NASA SRTM, USGS 3DEP and others, via AWS Open Data)."],
+    ];
+    $("aboutSources").replaceChildren(...sources.map(([k, t]) => h("li", null, h("strong", null, k + ": "), t)));
+
+    const nByReason = {};
+    rows.forEach((r) => { if (r.excluded) nByReason[r.excluded] = (nByReason[r.excluded] || 0) + 1; });
+    $("aboutReasons").replaceChildren(...Object.keys(REASON_HELP).map((k) =>
+      h("tr", null, h("td", null, REASONS[k] || k), h("td", null, REASON_HELP[k]), h("td", { class: "num" }, fmtNum(nByReason[k] || 0)))));
+
+    const rates = roll && roll.rates;
+    const labels = { "0": "0 (defaulted this year)", "1-4": "1 to 4", "5-9": "5 to 9", "10-19": "10 to 19", "20+": "20 or more" };
+    $("aboutRates").replaceChildren(...(rates && rates.all
+      ? [...Object.keys(labels), "all"].filter((k) => rates[k]).map((k) => {
+        const x = rates[k];
+        return h("tr", null, h("td", null, k === "all" ? "All parcels on the roll" : labels[k]), h("td", { class: "num" }, fmtNum(x.n)),
+          h("td", { class: "num" }, fmtNum(x.redeemed)), h("td", { class: "num" }, fmtPct(x.rate, 1) + (x.pooled ? " (pooled)" : "")));
+      })
+      : [h("tr", null, h("td", { colspan: 4 }, "No tax roll loaded for this auction yet."))]));
+
+    $("aboutAssumptions").replaceChildren(...ASSUMPTION_ROWS.filter(([k]) => A[k] != null).map(([k, label, fmt, desc]) =>
+      h("tr", null, h("td", null, label), h("td", { class: "num" }, fmtBound(A[k], fmt)), h("td", null, desc))));
   }
 
   /* ---------- tax roll section of the drawer ---------- */
@@ -792,7 +879,7 @@ if (typeof document !== "undefined") (function () {
 
   function renderControls() {
     const segCounts = { rental: rows.filter(inSeg.rental).length, land: rows.filter(inSeg.land).length, excluded: rows.filter(inSeg.excluded).length,
-      map: rows.filter((r) => r.lat != null).length, roll: rows.filter((r) => r.p_stay != null && r.p_stay > 0).length };
+      map: rows.filter((r) => r.lat != null).length, roll: rows.filter((r) => r.p_stay != null && r.p_stay > 0).length, about: "" };
     document.querySelectorAll("[data-seg]").forEach((b) => {
       const s = b.dataset.seg;
       b.setAttribute("aria-selected", s === state.seg);
@@ -808,12 +895,16 @@ if (typeof document !== "undefined") (function () {
     const list = rows.filter(inSeg[state.seg]).filter(passes);
     renderControls();
     renderKpis(a);
-    const isMap = state.seg === "map", isRoll = state.seg === "roll";
+    const isMap = state.seg === "map", isRoll = state.seg === "roll", isAbout = state.seg === "about";
     $("mapCard").hidden = !isMap;
     $("rollCard").hidden = !isRoll;
-    $("chartsSec").hidden = isMap || isRoll;
-    $("tableSec").hidden = isMap || isRoll;
-    if (isMap) capView.render(list);
+    $("aboutCard").hidden = !isAbout;
+    $("kpis").hidden = isAbout;                       // tiles and filters do not apply to the explanation page
+    $("filterRow").hidden = isAbout;
+    $("chartsSec").hidden = isMap || isRoll || isAbout;
+    $("tableSec").hidden = isMap || isRoll || isAbout;
+    if (isAbout) renderAbout();
+    else if (isMap) capView.render(list);
     else if (isRoll) {
       renderRollFacts();
       rollView.render(list);

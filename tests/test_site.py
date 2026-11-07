@@ -176,7 +176,7 @@ def test_page_has_the_tax_roll_tab_with_its_own_map(demo, tmp_path):
     assert 'id="rollFacts"' in html and 'id="noPulled"' in html
     for opt in ("pull", "years", "paid", "offered"):
         assert f'<option value="{opt}">' in html
-    assert html.count("data-seg=") == 5                                       # rentals, land, excluded, map, tax roll
+    assert html.count("data-seg=") == 6                                       # rentals, land, excluded, map, tax roll, how it works
     for own in ("rollStreets", "rollRelief", "rollCities"):                    # the second map has its own background controls
         assert f'id="{own}"' in html
 
@@ -207,3 +207,19 @@ def test_js_adjusted_cap_and_roll_classes_match_the_python_scoring(demo):
     assert out["pull"] == [0, 0, 0, 1, 2, 2, 2, 2]                             # chance pulled = 1 - odds; classes start at 15% and 50%
     assert out["offered"] == [0, 1, 2, 3, 3] and out["none"] == [None, None, None]
     assert all(a == b for a, b in out["shape"])                                # every mode has one colour step per label
+
+
+def test_about_tab_is_inlined_and_bindings_are_real_assumptions():
+    import dataclasses, re
+    from lacounty_tax.analyze import Assumptions
+    from lacounty_tax import site
+    html = site.render_html([], None, None) if False else None
+    tpl = __import__("importlib.resources", fromlist=["files"]).files("lacounty_tax").joinpath("templates")
+    about = tpl.joinpath("about.html").read_text()
+    fields = {f.name for f in dataclasses.fields(Assumptions)}
+    keys = set(re.findall(r'data-bind="a\.(\w+)"', about))
+    assert keys and keys <= fields, keys - fields
+    for i in ("aboutSources", "aboutReasons", "aboutRates", "aboutAssumptions"):
+        assert f'id="{i}"' in about
+    dash = tpl.joinpath("dashboard.html").read_text()
+    assert 'data-seg="about"' in dash and "<!--ABOUT-->" in dash

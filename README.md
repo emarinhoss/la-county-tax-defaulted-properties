@@ -230,6 +230,10 @@ In the dashboard: the rentals table gains **Odds of sale**, **Adj. cap**, **Yrs 
 paid, or times offered, with hollow rings for parcels already redeemed or off the roll. Click any parcel for its roll details. The tab and `p_stay` columns
 appear automatically when a roll snapshot exists.
 
+A **How it works** tab explains every tab and each calculation (rent, cap rate, rehab, max bid, odds of sale, risk flags, exclusion reasons, the measured
+redemption rates, the current assumptions and a glossary). Its numbers are filled in from the loaded data and `config/assumptions.toml`, so it never drifts from the
+dashboard; the text lives in `src/lacounty_tax/templates/about.html`.
+
 ## Roadmap
 
 All five phases, the map and the tax-roll signals are in place. Ideas not built: automatic discovery of new auction books, winning-bid history
