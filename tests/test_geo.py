@@ -172,3 +172,53 @@ def test_cli_geocode_hints_when_nothing_matches(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "GisClient", lambda *a, **k: gis(lambda p, n: Resp(data={"features": []})))
     assert main(["geocode", "T1", "--data-dir", str(tmp_path / "data")]) == 1
     assert "matched nothing" in capsys.readouterr().err
+
+
+# ---------- attribute (CENTER_LAT / CENTER_LON) mode, the default layer ----------
+from lacounty_tax.geo import DEFAULT_URL
+
+
+def attr_feature(ain, lat, lon):
+    return {"attributes": {"AIN": ain, "CENTER_LAT": lat, "CENTER_LON": lon}}
+
+
+def test_default_client_reads_center_coordinates_from_attributes():
+    c = GisClient(session=Session(lambda p, n: Resp(data={"features": [attr_feature("0000000001", 34.05, -118.25)]})),
+                  min_interval=0, sleep=lambda s: None)
+    assert c.url == DEFAULT_URL and "ASSR_PARCELS_25_View" in c.url and (c.lat_field, c.lon_field) == ("CENTER_LAT", "CENTER_LON")
+    assert c.centroids(["0000000001"]) == {"0000000001": (34.05, -118.25)} and c.source_label == "county_gis_center"
+    p = c.session.calls[0]
+    assert p["returnGeometry"] == "false" and p["outFields"] == "AIN,CENTER_LAT,CENTER_LON" and "outSR" not in p
+
+
+def test_attribute_mode_skips_missing_bad_and_out_of_county_coordinates():
+    feats = [attr_feature("0000000001", "34.05", "-118.25"),          # strings are parsed
+             attr_feature("0000000002", None, None),                  # null centre
+             attr_feature("0000000003", "n/a", "x"),                  # garbage
+             attr_feature("0000000004", 34.0, 118.2),                 # wrong sign: outside the county
+             attr_feature("0000000999", 34.05, -118.25)]              # not requested
+    c = GisClient(session=Session(lambda p, n: Resp(data={"features": feats})), min_interval=0, sleep=lambda s: None)
+    assert c.centroids(["0000000001", "0000000002", "0000000003", "0000000004"]) == {"0000000001": (34.05, -118.25)}
+
+
+def test_custom_url_uses_polygons_unless_fields_are_given(monkeypatch):
+    monkeypatch.delenv("LACOUNTY_GIS_LAT_FIELD", raising=False)
+    poly = GisClient("https://x/Layer/0/query", session=Session(lambda p, n: Resp(data={"features": []})), min_interval=0)
+    assert poly.lat_field is None and poly.source_label == "county_gis"
+    attr = GisClient("https://x/Layer/0/query", lat_field="LAT", lon_field="LON", session=Session(lambda p, n: Resp(data={"features": []})))
+    assert (attr.lat_field, attr.lon_field) == ("LAT", "LON")
+    forced = GisClient(session=Session(lambda p, n: Resp(data={"features": []})), lat_field="", lon_field="")     # polygon mode on the default layer
+    assert forced.lat_field is None
+    monkeypatch.setenv("LACOUNTY_GIS_LAT_FIELD", "Y")
+    monkeypatch.setenv("LACOUNTY_GIS_LON_FIELD", "X")
+    env = GisClient("https://x/Layer/0/query", session=Session(lambda p, n: Resp(data={"features": []})))
+    assert (env.lat_field, env.lon_field) == ("Y", "X")
+
+
+def test_geocode_auction_records_how_coordinates_were_derived(tmp_path):
+    d = make_auction(tmp_path, n=2)
+    ains = list(pd.read_csv(d / "items.csv", dtype={"ain": str})["ain"])
+    c = GisClient(session=Session(lambda p, n: Resp(data={"features": [attr_feature(a, 34.05, -118.25) for a in ains]})),
+                  min_interval=0, sleep=lambda s: None)
+    geocode_auction(d, c)
+    assert set(read_coordinates(d)["source"]) == {"county_gis_center"}

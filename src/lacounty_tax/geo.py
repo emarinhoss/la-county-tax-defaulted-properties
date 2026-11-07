@@ -25,11 +25,17 @@ import requests
 
 from .assessor import BlockedError
 
+# The county's 2025 assessor parcel layer on its ArcGIS Online organization: 2.4 million parcels with the AIN and
+# precomputed centre coordinates as plain attributes, so no polygons need downloading. Found with `probe-gis`; it
+# matched 1,252 of 1,252 AINs of the 2026B auction book and, unlike the county's own web servers, that host also
+# answers GitHub Actions runners.
 DEFAULT_URL = (
-    "https://public.gis.lacounty.gov/public/rest/services/"
-    "LACounty_Cache/LACounty_Parcel/MapServer/0/query"
+    "https://services.arcgis.com/RmCCgQtiZLDCtblq/ArcGIS/rest/services/"
+    "ASSR_PARCELS_25_View/FeatureServer/0/query"
 )
 DEFAULT_AIN_FIELD = "AIN"
+DEFAULT_LAT_FIELD = "CENTER_LAT"
+DEFAULT_LON_FIELD = "CENTER_LON"
 USER_AGENT = "lacounty-tax-research/0.1 (personal research tool)"
 RETRY_STATUSES = {429, 500, 502, 503, 504}
 # Rough LA County bounds, used to reject results in the wrong coordinate system or order.
@@ -81,6 +87,8 @@ class GisClient:
         ain_field: str | None = None,
         session: requests.Session | None = None,
         *,
+        lat_field: str | None = None,
+        lon_field: str | None = None,
         batch_size: int = 50,
         min_interval: float = 0.5,
         retries: int = 3,
@@ -89,13 +97,24 @@ class GisClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ):
+        default_layer = not (url or os.environ.get("LACOUNTY_GIS_URL"))
         self.url = url or os.environ.get("LACOUNTY_GIS_URL") or DEFAULT_URL
         self.ain_field = ain_field or os.environ.get("LACOUNTY_GIS_AIN_FIELD") or DEFAULT_AIN_FIELD
+        # With lat/lon fields the centre comes straight from attributes (no geometry); without them it is the
+        # centroid of the parcel polygon. The defaults only apply to the default layer.
+        lat = lat_field if lat_field is not None else os.environ.get("LACOUNTY_GIS_LAT_FIELD", DEFAULT_LAT_FIELD if default_layer else "")
+        lon = lon_field if lon_field is not None else os.environ.get("LACOUNTY_GIS_LON_FIELD", DEFAULT_LON_FIELD if default_layer else "")
+        self.lat_field, self.lon_field = (lat, lon) if lat and lon else (None, None)
         self.session = session or requests.Session()
         self.session.headers.setdefault("User-Agent", USER_AGENT)
         self.batch_size, self.min_interval = batch_size, min_interval
         self.retries, self.backoff, self.timeout = retries, backoff, timeout
         self._sleep, self._clock, self._last = sleep, clock, None
+
+    @property
+    def source_label(self) -> str:
+        """How coordinates from this client were derived, recorded in coordinates.csv."""
+        return "county_gis_center" if self.lat_field else "county_gis"
 
     def _throttle(self) -> None:
         if self._last is not None:
@@ -106,16 +125,14 @@ class GisClient:
 
     def _query(self, ains: list[str]) -> dict:
         quoted = ",".join(f"'{a}'" for a in ains)
-        return self.request({
-            "where": f"{self.ain_field} IN ({quoted})",
-            "outFields": self.ain_field,
-            "returnGeometry": "true",
-            "outSR": "4326",
-            "geometryPrecision": "6",
-            "f": "json",
-        })
+        params = {"where": f"{self.ain_field} IN ({quoted})", "f": "json"}
+        if self.lat_field:
+            params.update({"outFields": f"{self.ain_field},{self.lat_field},{self.lon_field}", "returnGeometry": "false"})
+        else:
+            params.update({"outFields": self.ain_field, "returnGeometry": "true", "outSR": "4326", "geometryPrecision": "6"})
+        return self.request(params)
 
-    def request(self, params: dict) -> dict:
+    def request(self, params: dict, url: str | None = None) -> dict:
         """GET the service with retries; raises BlockedError / GisError, returns the parsed JSON."""
         last_err = "no attempt made"
         for attempt in range(self.retries + 1):
@@ -123,7 +140,7 @@ class GisClient:
                 self._sleep(self.backoff * 2 ** (attempt - 1))
             self._throttle()
             try:
-                resp = self.session.get(self.url, params=params, timeout=self.timeout)
+                resp = self.session.get(url or self.url, params=params, timeout=self.timeout)
             except (requests.Timeout, requests.ConnectionError) as e:
                 last_err = f"{type(e).__name__}: {e}"
                 continue
@@ -156,12 +173,22 @@ class GisClient:
         for i in range(0, len(ains), self.batch_size):
             batch = ains[i:i + self.batch_size]
             for feat in self._query(batch).get("features", []):
-                ain = re.sub(r"\D", "", str((feat.get("attributes") or {}).get(self.ain_field, "")))
-                c = polygon_centroid((feat.get("geometry") or {}).get("rings") or [])
-                if ain in batch and c:
+                attrs = feat.get("attributes") or {}
+                ain = re.sub(r"\D", "", str(attrs.get(self.ain_field, "")))
+                if ain not in batch:
+                    continue
+                if self.lat_field:                                  # centre coordinates stored as attributes
+                    try:
+                        lat, lon = float(attrs[self.lat_field]), float(attrs[self.lon_field])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                else:                                               # centroid of the parcel polygon
+                    c = polygon_centroid((feat.get("geometry") or {}).get("rings") or [])
+                    if not c:
+                        continue
                     lon, lat = c
-                    if in_county(lat, lon):
-                        out.setdefault(ain, (round(lat, 6), round(lon, 6)))
+                if in_county(lat, lon):
+                    out.setdefault(ain, (round(lat, 6), round(lon, 6)))
         return out
 
 
@@ -193,7 +220,7 @@ def geocode_auction(
         got = client.centroids(batch)
         if got:
             rows = pd.DataFrame(
-                [{"ain": a, "lat": lat, "lon": lon, "source": "county_gis", "fetched_at": now.isoformat()}
+                [{"ain": a, "lat": lat, "lon": lon, "source": getattr(client, "source_label", "county_gis"), "fetched_at": now.isoformat()}
                  for a, (lat, lon) in got.items()], columns=COORD_COLUMNS)
             have = pd.concat([have, rows], ignore_index=True)
             have.to_csv(auction_dir / "coordinates.csv", index=False)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from datetime import date
@@ -15,6 +16,7 @@ from .boundaries import DEFAULT_CITIES_URL, load_county_outline, load_geojson, w
 from .geo import GisClient, GisError, geocode_auction
 from .meta import AuctionMeta, save_meta
 from .parse import parse_pdf
+from .probe import BASE as PROBE_BASE, markdown_report, probe, sample_ains, to_json
 from .refresh import find_auctions, refresh_auction
 from .relief import ReliefError, write_relief
 from .site import build_site
@@ -114,7 +116,8 @@ def _cmd_geocode(args: argparse.Namespace) -> int:
     if not (auction_dir / "items.csv").exists():
         print(f"error: {auction_dir / 'items.csv'} not found; run `parse` first.", file=sys.stderr)
         return 2
-    client = GisClient(args.gis_url, args.ain_field, min_interval=args.delay, batch_size=args.batch_size)
+    client = GisClient(args.gis_url, args.ain_field, lat_field=args.lat_field, lon_field=args.lon_field,
+                       min_interval=args.delay, batch_size=args.batch_size)
 
     def progress(done: int, total: int) -> None:
         print(f"  looked up {done}/{total} parcels", file=sys.stderr)
@@ -187,6 +190,45 @@ def _cmd_build_relief(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_probe_gis(args: argparse.Namespace) -> int:
+    import pandas as pd
+    if args.ains:
+        ains = [a.strip() for a in args.ains.split(",") if a.strip()]
+    else:
+        items = Path(args.data_dir) / args.auction / "items.csv"
+        if not items.exists():
+            print(f"error: {items} not found; run `parse` first or pass --ains.", file=sys.stderr)
+            return 2
+        ains = list(pd.read_csv(items, dtype={"ain": str})["ain"])
+    sample = sample_ains(ains, args.sample)
+    client = GisClient(args.base, lat_field="", lon_field="", min_interval=args.delay, retries=2)
+
+    def progress(done: int, total: int, name: str) -> None:
+        print(f"  [{done}/{total}] {name}", file=sys.stderr)
+
+    try:
+        reports = probe(client, sample, base=args.base, names=args.name, known_only=args.known_only,
+                        max_services=args.max_services, progress=progress)
+    except BlockedError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    except GisError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    md = markdown_report(reports, len(sample), args.base)
+    print(md)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(md)
+    if args.json:
+        Path(args.json).write_text(json.dumps(to_json(reports), indent=1) + "\n")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a") as fh:
+            fh.write(md)
+    return 0 if any(r.usable for r in reports) else 1
+
+
 def _cmd_make_demo(args: argparse.Namespace) -> int:
     fmr = read_fmr_csv(args.fmr)
     if "metro_default" not in fmr:
@@ -213,7 +255,8 @@ def _cmd_refresh(args: argparse.Namespace) -> int:
         print("no auctions with an items.csv; nothing to refresh")
         return 0
     client = AssessorClient(min_interval=args.delay)
-    gis = None if args.no_geocode else GisClient(args.gis_url, args.ain_field, min_interval=args.delay)
+    gis = None if args.no_geocode else GisClient(args.gis_url, args.ain_field, lat_field=args.lat_field,
+                                                 lon_field=args.lon_field, min_interval=args.delay)
     today = date.fromisoformat(args.today) if args.today else date.today()
     results = []
     for d in dirs:
@@ -285,6 +328,9 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--data-dir", default="data/auctions")
     g.add_argument("--gis-url", help="parcel layer query URL (default: LA County public parcel service)")
     g.add_argument("--ain-field", help="AIN field name in that layer (default AIN)")
+    g.add_argument("--lat-field", help="attribute holding the parcel centre latitude (default CENTER_LAT for the default layer; "
+                   "pass '' to use polygon centroids instead)")
+    g.add_argument("--lon-field", help="attribute holding the parcel centre longitude (default CENTER_LON for the default layer)")
     g.add_argument("--delay", type=float, default=0.5)
     g.add_argument("--batch-size", type=int, default=50)
     g.set_defaults(func=_cmd_geocode)
@@ -316,6 +362,20 @@ def main(argv: list[str] | None = None) -> int:
     rl.add_argument("--z-factor", type=float, default=2.0, help="vertical exaggeration of the shading (default 2)")
     rl.set_defaults(func=_cmd_build_relief)
 
+    pr = sub.add_parser("probe-gis", help="find which county ArcGIS layers can turn AINs into coordinates")
+    pr.add_argument("--auction", default="2026B", help="auction whose AINs form the sample (default 2026B)")
+    pr.add_argument("--data-dir", default="data/auctions")
+    pr.add_argument("--ains", help="comma-separated AINs instead of an auction's items.csv")
+    pr.add_argument("--sample", type=int, default=40, help="how many AINs to test (default 40)")
+    pr.add_argument("--base", default=PROBE_BASE, help="ArcGIS services root of the organization to scan")
+    pr.add_argument("--name", action="append", help="probe only this service; repeatable")
+    pr.add_argument("--known-only", action="store_true", help="only the short list of known candidates (fast)")
+    pr.add_argument("--max-services", type=int, help="stop after N services")
+    pr.add_argument("--delay", type=float, default=0.2, help="seconds between requests (default 0.2)")
+    pr.add_argument("--out", help="write the Markdown report here")
+    pr.add_argument("--json", help="write the full results as JSON here")
+    pr.set_defaults(func=_cmd_probe_gis)
+
     d = sub.add_parser("make-demo", help="write a clearly fake demo auction for trying the dashboard")
     d.add_argument("--out", default="demo/auctions")
     d.add_argument("--fmr", default="data/reference/hud_safmr.csv")
@@ -344,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--no-geocode", action="store_true", help="skip the parcel coordinate lookup")
     r.add_argument("--gis-url", help="parcel layer query URL (default: LA County public parcel service)")
     r.add_argument("--ain-field", help="AIN field name in that layer (default AIN)")
+    r.add_argument("--lat-field", help="attribute holding the parcel centre latitude (see `geocode --help`)")
+    r.add_argument("--lon-field", help="attribute holding the parcel centre longitude")
     r.set_defaults(func=_cmd_refresh)
 
     args = ap.parse_args(argv)

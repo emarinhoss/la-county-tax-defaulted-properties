@@ -131,19 +131,36 @@ recomputed with the bid slider and filters), land and excluded parcels as small 
 through to the detail drawer. The layer checkboxes and all filters apply; the note under the map says how many matching
 parcels have no coordinates.
 
-Coordinates come from LA County's public parcel GIS service (parcel polygon centroid by AIN), so vacant lots without a street
-address are mapped too:
+Coordinates come from the county's own assessor parcel layer on its ArcGIS Online organization (`ASSR_PARCELS_25_View`, 2.4 million parcels with
+the AIN and precomputed `CENTER_LAT`/`CENTER_LON` attributes, so no polygons are downloaded). Vacant lots with no street address are mapped
+too:
 
 ```bash
-lacounty-tax geocode 2026B     # -> data/auctions/2026B/coordinates.csv (only missing AINs are looked up)
+lacounty-tax geocode 2026B     # -> data/auctions/2026B/coordinates.csv (only missing AINs are looked up; ~1 s for a whole book)
 ```
 
-The weekly refresh runs this step too (`--no-geocode` skips it) and never fails because of it. Coordinates never change, so they
-are looked up once per parcel.
+The weekly refresh runs this step too (`--no-geocode` skips it) and never fails because of it. Coordinates never change, so they are looked up once
+per parcel. Verified on the real 2026B book: all 1,252 of 1,252 parcels found. An earlier run that used polygon centroids from the county's web
+server agreed with the `CENTER_*` values to a median of 1.9 m (90% within 26 m; the tail is large rural parcels). `coordinates.csv` records the
+method in its `source` column (`county_gis` = polygon centroid, `county_gis_center` = the layer's centre attributes).
 
-- **Not yet run against the live service.** The default layer URL and the `AIN` field name are best known values. If the first run
-  reports errors or matches nothing, pass `--gis-url` (a parcel layer's `.../query` URL) and `--ain-field`, or set
-  `LACOUNTY_GIS_URL` / `LACOUNTY_GIS_AIN_FIELD`. Parcels the layer doesn't contain (some condo units, for example) stay unmapped.
+### Finding a layer: `probe-gis`
+
+The county moves and renames layers. `probe-gis` scans the organization's parcel-like services (about 105, ~2 minutes), checks each layer's fields,
+tests it with real AINs from an auction book, and prints the `geocode` flags for the best one:
+
+```bash
+lacounty-tax probe-gis --auction 2026B                 # full scan; --known-only for a 10-second check of the shortlist
+```
+
+It can also run on GitHub's network: Actions -> "Probe parcel layers" -> Run workflow (the report lands in the run summary and as an artifact).
+It ranks layers that return one row per parcel with attribute coordinates first, so multi-year tables (one row per roll year) and polygon-only
+layers rank lower. Pass the winning layer to `geocode`/`refresh` with `--gis-url`, `--ain-field`, `--lat-field`, `--lon-field` (or the
+`LACOUNTY_GIS_URL`, `LACOUNTY_GIS_AIN_FIELD`, `LACOUNTY_GIS_LAT_FIELD`, `LACOUNTY_GIS_LON_FIELD` environment variables). Other things the probe found
+in that organization, not used yet: `Assessor Parcel Data Roll 2026` (4.9M rows: AIN, bedrooms, baths, units, year built, roll values and
+coordinates in one table), `TTC_Secured_Defaulted_Tax_Roll` (1.7M rows: redemption amounts, defaulted years, redemption dates), and per-auction layers
+for 2022A through 2025B (item, AIN, minimum bid, address with shapes).
+
 - **County outline and limits.** The map draws a dashed Los Angeles County outline (`data/reference/boundaries/la_county.geojson`) and limits
   panning and zooming to the county and its surroundings. The outline is made by dissolving every polygon of the county's own
   "City and Community Boundaries" layer (about 4,075 sq mi, following the coastline; thousands of sliver holes between neighbouring
