@@ -1,6 +1,6 @@
 {
   "auction": "2026B",
-  "snapshot": "2026-11-06.csv",
+  "snapshot": "2026-11-07.csv",
   "assumptions": {
     "bid_multiple": 1.0,
     "closing_cost_pct": 0.03,
