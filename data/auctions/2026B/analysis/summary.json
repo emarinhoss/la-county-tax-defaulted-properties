@@ -1,6 +1,6 @@
 {
   "auction": "2026B",
-  "snapshot": "2026-11-07.csv",
+  "snapshot": "2026-11-08.csv",
   "assumptions": {
     "bid_multiple": 1.0,
     "closing_cost_pct": 0.03,
@@ -35,7 +35,7 @@
   "median_cap_rate": 0.2800944632775677,
   "above_target": 98,
   "roll": {
-    "snapshot": "2026-11-07.csv",
+    "snapshot": "2026-11-08.csv",
     "rates": {
       "all": {
         "n": 1220,
