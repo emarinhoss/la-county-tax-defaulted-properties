@@ -1,6 +1,6 @@
 {
   "auction": "2026B",
-  "snapshot": "2026-11-09.csv",
+  "snapshot": "2026-11-16.csv",
   "assumptions": {
     "bid_multiple": 1.0,
     "closing_cost_pct": 0.03,
@@ -27,20 +27,21 @@
   },
   "excluded": {
     "tax_current": 128,
-    "no_residential_units": 36,
+    "no_residential_units": 34,
     "improved_flag_without_address": 8,
+    "redeemed_per_roll": 3,
     "multi_unit_5plus": 1
   },
-  "ranked": 111,
-  "median_cap_rate": 0.2800944632775677,
-  "above_target": 98,
+  "ranked": 110,
+  "median_cap_rate": 0.2806843624800588,
+  "above_target": 97,
   "roll": {
-    "snapshot": "2026-11-09.csv",
+    "snapshot": "2026-11-16.csv",
     "rates": {
       "all": {
         "n": 1220,
-        "redeemed": 96,
-        "rate": 0.07868852459016394
+        "redeemed": 99,
+        "rate": 0.08114754098360656
       },
       "0": {
         "n": 32,
@@ -56,8 +57,8 @@
       },
       "5-9": {
         "n": 234,
-        "redeemed": 56,
-        "rate": 0.23931623931623933,
+        "redeemed": 59,
+        "rate": 0.25213675213675213,
         "pooled": false
       },
       "10-19": {
@@ -74,7 +75,7 @@
       }
     },
     "on_roll": 1220,
-    "redeemed": 128
+    "redeemed": 131
   },
   "history_sales": [
     "2022A",
